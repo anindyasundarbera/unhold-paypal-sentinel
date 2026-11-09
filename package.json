@@ -1,0 +1,28 @@
+{
+  "name": "unhold-paypal",
+  "version": "1.0.0",
+  "description": "Unhold: Autonomous Cash-Flow & Payment Protection Agent Team for PayPal Sellers",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc && cp src/seed/unhold_seed.json dist/seed/",
+    "test": "tsx --test tests/*.test.ts",
+    "dev": "tsx watch src/index.ts"
+  },
+  "keywords": [
+    "paypal",
+    "cashflow",
+    "agents",
+    "unhold",
+    "ag-grid",
+    "fintech"
+  ],
+  "author": "Antigravity Team",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^24.19.2",
+    "tsx": "^4.23.15",
+    "typescript": "^5.9.3"
+  }
+}
