@@ -73,15 +73,31 @@
 
 ---
 
-### ⏳ Step 4: Buyer Assurance & A2A SD-JWT Settlement (NEXT)
-- [ ] Dispute webhook receiver (`CUSTOMER.DISPUTE.CREATED`).
-- [ ] Prompt injection defense shield for buyer messages.
-- [ ] SD-JWT (RFC 9901) ES256 delivery proof generator and verifier.
-- [ ] Automated Agent-to-Agent negotiation protocol and outcome state machine.
+### ✅ Step 4: Buyer Assurance & A2A SD-JWT Settlement (COMPLETED)
+- [x] Adversarial Prompt Injection Defense Shield (`src/engine/prompt_guard.ts`):
+  - Detects `DIRECT_OVERRIDE`, `DELIMITER_INJECTION`, `JAILBREAK_PERSONA`, `AUTHORITY_IMPERSONATION`, and `ACTION_FORCING`.
+  - Neutralizes fake system/role delimiter tags; calculates normalized risk scores (0.0 to 1.0) and risk levels (`LOW`, `MEDIUM`, `HIGH`, `CRITICAL`).
+  - Automatically suspends and escalates concessions on high/critical adversarial attacks to prevent unauthorized payouts.
+- [x] RFC 9901 Selective Disclosure JWT (SD-JWT) Engine (`src/engine/sdjwt.ts`):
+  - WebCrypto ECDSA P-256 (`ES256`) and SHA-256 implementation with 128-bit cryptographically secure random salting.
+  - Generates verifiable delivery credentials with selective disclosure digests for PII (`recipient_name`, `delivery_street_address`, `postal_code`, `gps_coordinates`).
+  - Cryptographically verifies ES256 issuer signature and disclosure digests with tampering detection.
+- [x] Autonomous Agent-to-Agent (A2A) Negotiation Protocol (`src/engine/a2a_negotiator.ts`):
+  - 4-turn autonomous negotiation state machine (`OPENED -> EVIDENCE_PRESENTED -> COUNTER_OFFERED -> SETTLED`).
+  - Verifies carrier delivery proof, presents SD-JWT credential to Buyer Agent, and issues courtesy future discount voucher for amicable dispute withdrawal.
+  - Updates dispute status in ledger and appends SHA-256 tamper-evident audit blocks.
+- [x] REST Endpoints in `src/server.ts`:
+  - `GET /api/disputes` — List all open/resolved disputes.
+  - `POST /api/disputes/ingest` — Ingest dispute payload.
+  - `POST /api/disputes/:id/negotiate` — Run autonomous A2A dispute settlement.
+  - `POST /api/prompt-guard/check` — Standalone prompt injection audit probe.
+  - `POST /api/sdjwt/issue` and `POST /api/sdjwt/verify` — Issue and verify RFC 9901 SD-JWTs.
+  - Webhook handler enhanced for live `CUSTOMER.DISPUTE.CREATED` events.
+- [x] Automated test suite passing (40/40 tests across 11 suites in 3.16s).
 
 ---
 
-### ⏳ Step 5: Payment Guard (Anti-Scam & Pre-Flight)
+### ⏳ Step 5: Payment Guard (Anti-Scam & Pre-Flight) (NEXT)
 - [ ] Email parser extracting transaction IDs and amounts from payment notices.
 - [ ] PayPal live capture check (`GET /v2/payments/captures/{id}`); 404 block & phishing report.
 - [ ] Pre-flight Seller Protection auditor ($750 signature threshold, address match).

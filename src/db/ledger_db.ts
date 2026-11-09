@@ -410,6 +410,79 @@ export class LedgerDB {
     }));
   }
 
+  // --- Disputes Methods ---
+
+  insertDispute(d: DisputeRecord): void {
+    const stmt = this.db.prepare(`
+      INSERT OR REPLACE INTO disputes (
+        dispute_id, order_id, capture_id, amount, currency, status, reason,
+        buyer_message, respond_by, created_at, signed_sd_jwt
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    stmt.run(
+      d.dispute_id,
+      d.order_id,
+      d.capture_id,
+      d.amount,
+      d.currency,
+      d.status,
+      d.reason,
+      d.buyer_message,
+      d.respond_by,
+      d.created_at,
+      d.signed_sd_jwt || null
+    );
+  }
+
+  getDispute(disputeId: string): DisputeRecord | null {
+    const r = this.db
+      .prepare('SELECT * FROM disputes WHERE dispute_id = ?')
+      .get(disputeId) as Record<string, unknown> | undefined;
+    if (!r) return null;
+    return {
+      dispute_id: r.dispute_id as string,
+      order_id: r.order_id as string,
+      capture_id: r.capture_id as string,
+      amount: r.amount as number,
+      currency: r.currency as string,
+      status: r.status as string,
+      reason: r.reason as string,
+      buyer_message: r.buyer_message as string,
+      respond_by: r.respond_by as string,
+      created_at: r.created_at as string,
+      signed_sd_jwt: (r.signed_sd_jwt as string) || undefined
+    };
+  }
+
+  getAllDisputes(): DisputeRecord[] {
+    const rows = this.db
+      .prepare('SELECT * FROM disputes ORDER BY created_at DESC')
+      .all() as unknown as Record<string, unknown>[];
+    return rows.map((r) => ({
+      dispute_id: r.dispute_id as string,
+      order_id: r.order_id as string,
+      capture_id: r.capture_id as string,
+      amount: r.amount as number,
+      currency: r.currency as string,
+      status: r.status as string,
+      reason: r.reason as string,
+      buyer_message: r.buyer_message as string,
+      respond_by: r.respond_by as string,
+      created_at: r.created_at as string,
+      signed_sd_jwt: (r.signed_sd_jwt as string) || undefined
+    }));
+  }
+
+  updateDisputeStatus(disputeId: string, status: string, signedSdJwt?: string): boolean {
+    const stmt = this.db.prepare(`
+      UPDATE disputes
+      SET status = ?, signed_sd_jwt = COALESCE(?, signed_sd_jwt)
+      WHERE dispute_id = ?
+    `);
+    const res = stmt.run(status, signedSdJwt || null, disputeId);
+    return (res.changes ?? 0) > 0;
+  }
+
   // --- Audit Chain Methods ---
 
   appendAuditEntry(params: {

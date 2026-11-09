@@ -11,7 +11,10 @@ import { buildHoldWaterfall } from './engine/waterfall.js';
 import { simulateCashReleases, planCashGoal } from './engine/monte_carlo.js';
 import { matchAllManifests } from './engine/tracking_matcher.js';
 import { executeBatchTrackingUpload, type BatchUploadOptions } from './engine/batch_uploader.js';
-import type { CarrierManifestRecord } from './types/ledger.js';
+import { analyzePromptInjection } from './engine/prompt_guard.js';
+import { issueDeliverySDJWT, verifyDeliverySDJWT, type DeliveryProofPayload } from './engine/sdjwt.js';
+import { runAutonomousDisputeSettlement, type SettlementOptions } from './engine/a2a_negotiator.js';
+import type { CarrierManifestRecord, DisputeRecord } from './types/ledger.js';
 import type { WebhookVerificationRequest } from './types/paypal.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -161,6 +164,54 @@ export async function createServer(customDb?: LedgerDB, customPayPal?: PayPalCli
     return executeBatchTrackingUpload(db, paypal, body);
   });
 
+  // --- Disputes & Buyer Assurance Endpoints ---
+
+  fastify.get('/api/disputes', async () => {
+    return {
+      disputes: db.getAllDisputes()
+    };
+  });
+
+  fastify.post('/api/disputes/ingest', async (req) => {
+    const dispute = req.body as DisputeRecord;
+    db.insertDispute(dispute);
+    return {
+      status: 'INGESTED',
+      dispute_id: dispute.dispute_id
+    };
+  });
+
+  fastify.post('/api/disputes/:id/negotiate', async (req, reply) => {
+    const params = req.params as { id: string };
+    const body = (req.body as { options?: SettlementOptions }) || {};
+    const dispute = db.getDispute(params.id);
+    if (!dispute) {
+      return reply.status(404).send({ error: `Dispute ${params.id} not found` });
+    }
+    return runAutonomousDisputeSettlement(dispute, db, body.options);
+  });
+
+  fastify.post('/api/prompt-guard/check', async (req) => {
+    const body = req.body as { message?: string };
+    return analyzePromptInjection(body.message || '');
+  });
+
+  fastify.post('/api/sdjwt/issue', async (req) => {
+    const body = req.body as {
+      proof: DeliveryProofPayload;
+      selectiveFields: Array<keyof DeliveryProofPayload>;
+    };
+    return issueDeliverySDJWT(body.proof, body.selectiveFields);
+  });
+
+  fastify.post('/api/sdjwt/verify', async (req) => {
+    const body = req.body as {
+      sdJwt: string;
+      publicKeyJwk: JsonWebKey;
+    };
+    return verifyDeliverySDJWT(body.sdJwt, body.publicKeyJwk);
+  });
+
   fastify.get('/api/audit', async () => {
     const chain = db.getAuditChain();
     const verification = db.verifyLedgerAuditChain();
@@ -233,9 +284,40 @@ export async function createServer(customDb?: LedgerDB, customPayPal?: PayPalCli
       actionResult = 'released';
       detail = `Capture ${captureId} completed and funds released`;
     } else if (eventType === 'CUSTOMER.DISPUTE.CREATED') {
-      const disputeId = (resource.dispute_id as string) || '';
+      const disputeId = (resource.dispute_id as string) || `DISP-${eventId.slice(-8)}`;
+      const amountVal = Number((resource.dispute_amount as { value?: string })?.value || '0.00');
+      const currency = (resource.dispute_amount as { currency_code?: string })?.currency_code || 'USD';
+      const reason = (resource.reason as string) || 'ITEM_NOT_RECEIVED';
+      const buyerMsg =
+        (resource.messages as Array<{ content?: string }>)?.[0]?.content ||
+        (resource.buyer_message as string) ||
+        'Buyer opened dispute';
+      const respondBy =
+        (resource.respond_by_date as string) ||
+        new Date(Date.now() + 10 * 86400000).toISOString();
+
+      const disputedTxns = resource.disputed_transactions as Array<{
+        seller_transaction_id?: string;
+        buyer_transaction_id?: string;
+      }>;
+      const orderId = disputedTxns?.[0]?.seller_transaction_id || (resource.id as string) || eventId;
+      const captureId = disputedTxns?.[0]?.buyer_transaction_id || orderId;
+
       actionResult = 'dispute_opened';
-      detail = `Dispute ${disputeId} opened; funds placed on hold`;
+      detail = `Dispute ${disputeId} opened for $${amountVal} (${reason}); funds placed on hold`;
+
+      db.insertDispute({
+        dispute_id: disputeId,
+        order_id: orderId,
+        capture_id: captureId,
+        amount: amountVal,
+        currency,
+        status: 'WAITING_FOR_SELLER_RESPONSE',
+        reason,
+        buyer_message: buyerMsg,
+        respond_by: respondBy,
+        created_at: new Date().toISOString()
+      });
     }
 
     // Append to tamper-evident audit chain

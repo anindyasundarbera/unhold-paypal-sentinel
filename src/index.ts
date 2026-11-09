@@ -13,4 +13,7 @@ export * from './engine/monte_carlo.js';
 export * from './engine/waterfall.js';
 export * from './engine/tracking_matcher.js';
 export * from './engine/batch_uploader.js';
+export * from './engine/prompt_guard.js';
+export * from './engine/sdjwt.js';
+export * from './engine/a2a_negotiator.js';
 export * from './server.js';
