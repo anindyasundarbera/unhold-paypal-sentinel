@@ -568,6 +568,40 @@ We placed a temporary hold on this payment while we verify delivery. Upload trac
       alert('Synced with PayPal Sandbox ledger!');
     });
 
+    const zapierBtn = document.getElementById('btnZapierPing');
+    if (zapierBtn) {
+      zapierBtn.addEventListener('click', async () => {
+        zapierBtn.disabled = true;
+        zapierBtn.textContent = 'Pinging...';
+        try {
+          const res = await fetch('/api/lowcode/zapier/trigger', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              event: 'manual.ui_ping',
+              data: {
+                triggered_by: 'Merchant Dashboard UI',
+                timestamp: new Date().toISOString(),
+                status: 'operational',
+                total_held: document.getElementById('kpiHeld')?.textContent || '$5,235.24'
+              }
+            })
+          });
+          const data = await res.json();
+          if (data.success) {
+            alert(`⚡ Zapier Webhook Ping Succeeded!\n\nStatus: HTTP ${data.status}\nWebhook: ${data.webhook_url}\nEvent: ${data.event}\nTimestamp: ${data.dispatched_at}\n\nCheck your Zapier Zap history to see the triggered action!`);
+          } else {
+            alert(`Zapier dispatch result: ${data.error || 'Failed'}`);
+          }
+        } catch (err) {
+          alert('Zapier ping failed: ' + err.message);
+        } finally {
+          zapierBtn.disabled = false;
+          zapierBtn.textContent = '⚡ Ping Zapier';
+        }
+      });
+    }
+
     document.getElementById('btnToggleWaterfall').addEventListener('click', () => {
       currentWaterfallMode = currentWaterfallMode === 'now' ? 'plan' : 'now';
       document.getElementById('btnToggleWaterfall').textContent = currentWaterfallMode === 'now' 
