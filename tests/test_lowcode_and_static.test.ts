@@ -39,6 +39,14 @@ describe('Step 6 & 7: Static UI Wireframes & Low-Code Integrations', () => {
     assert.equal(deckRes.statusCode, 200);
     assert.match(deckRes.payload, /Unhold wireframes/);
 
+    // Documentation GET /doc
+    const docRes = await server.inject({
+      method: 'GET',
+      url: '/doc'
+    });
+    assert.equal(docRes.statusCode, 200);
+    assert.match(docRes.payload, /Unhold Merchant System/);
+
     await server.close();
   });
 

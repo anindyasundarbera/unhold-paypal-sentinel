@@ -85,6 +85,14 @@ export async function createServer(customDb?: LedgerDB, customPayPal?: PayPalCli
     fastify.get('/deck', async (req, reply) => {
       return reply.sendFile('deck.html');
     });
+
+    fastify.get('/doc', async (req, reply) => {
+      return reply.sendFile('doc.html');
+    });
+
+    fastify.get('/docs', async (req, reply) => {
+      return reply.sendFile('doc.html');
+    });
   }
 
   // Preserve raw body Buffer for webhook signature verification

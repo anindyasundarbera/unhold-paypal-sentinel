@@ -1,0 +1,285 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Unhold — Merchant System Documentation</title>
+  <meta name="description" content="Technical and merchant operating documentation for Unhold: Autonomous PayPal Cash-Flow & Payment Protection Sentinel.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #0d1117;
+      --card-bg: #161b22;
+      --card-border: #30363d;
+      --text: #c9d1d9;
+      --text-muted: #8b949e;
+      --heading: #f0f6fc;
+      --primary: #238636;
+      --accent: #58a6ff;
+      --warning: #d29922;
+      --danger: #f85149;
+      --purple: #bc8cff;
+      --font: 'Instrument Sans', system-ui, -apple-system, sans-serif;
+      --mono: 'JetBrains Mono', monospace;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--font);
+      font-size: 14.5px;
+      line-height: 1.65;
+    }
+
+    header.doc-header {
+      background: #010409;
+      border-bottom: 1px solid var(--card-border);
+      padding: 18px 32px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      position: sticky;
+      top: 0;
+      z-index: 50;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 18px;
+      font-weight: 700;
+      color: var(--heading);
+    }
+    .brand .dot {
+      width: 10px;
+      height: 10px;
+      background: var(--accent);
+      border-radius: 50%;
+    }
+
+    .doc-container {
+      max-width: 980px;
+      margin: 0 auto;
+      padding: 40px 24px 80px;
+    }
+
+    h1 {
+      font-size: 32px;
+      font-weight: 700;
+      color: var(--heading);
+      letter-spacing: -0.5px;
+      margin-bottom: 12px;
+    }
+
+    h2 {
+      font-size: 22px;
+      font-weight: 600;
+      color: var(--heading);
+      margin-top: 40px;
+      margin-bottom: 14px;
+      border-bottom: 1px solid var(--card-border);
+      padding-bottom: 8px;
+    }
+
+    h3 {
+      font-size: 17px;
+      font-weight: 600;
+      color: var(--accent);
+      margin-top: 24px;
+      margin-bottom: 8px;
+    }
+
+    p { margin-bottom: 14px; }
+
+    ul, ol {
+      margin-left: 22px;
+      margin-bottom: 16px;
+    }
+    li { margin-bottom: 6px; }
+
+    code {
+      font-family: var(--mono);
+      background: #1f242c;
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-size: 13px;
+      color: #7ee787;
+    }
+
+    .callout {
+      background: rgba(88, 166, 255, 0.08);
+      border: 1px solid rgba(88, 166, 255, 0.25);
+      border-radius: 8px;
+      padding: 16px 20px;
+      margin: 20px 0;
+    }
+    .callout-title {
+      font-weight: 600;
+      color: var(--accent);
+      margin-bottom: 4px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .moment-card {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-left: 4px solid var(--accent);
+      border-radius: 6px;
+      padding: 16px 20px;
+      margin-bottom: 16px;
+    }
+    .moment-card.moment-fraud {
+      border-left-color: var(--danger);
+    }
+    .moment-card.moment-dispute {
+      border-left-color: var(--warning);
+    }
+    .moment-card.moment-cash {
+      border-left-color: #3fb950;
+    }
+
+    .moment-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      margin-bottom: 6px;
+    }
+    .moment-title {
+      font-weight: 700;
+      color: var(--heading);
+      font-size: 15px;
+    }
+    .moment-badge {
+      font-family: var(--mono);
+      font-size: 11px;
+      background: #21262d;
+      padding: 2px 8px;
+      border-radius: 12px;
+      color: var(--text-muted);
+    }
+
+    .btn {
+      background: #21262d;
+      color: var(--heading);
+      border: 1px solid var(--card-border);
+      padding: 6px 14px;
+      border-radius: 6px;
+      font-size: 13px;
+      cursor: pointer;
+      text-decoration: none;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .btn:hover { background: #30363d; }
+  </style>
+</head>
+<body>
+
+  <header class="doc-header">
+    <div class="brand">
+      <span class="dot"></span>
+      Unhold Documentation
+    </div>
+    <div>
+      <a href="/" class="btn">← Back to Merchant Cockpit</a>
+    </div>
+  </header>
+
+  <main class="doc-container">
+
+    <h1>Unhold Merchant System & Operating Guide</h1>
+    <p style="color:var(--text-muted);font-size:16px;">
+      Autonomous Cash-Flow & Payment Protection Agent Team for PayPal Sellers.
+    </p>
+
+    <div class="callout">
+      <div class="callout-title">💡 The Core Problem Solved</div>
+      <p>
+        PayPal places temporary 21-day holds on seller transactions during sales volume surges, cross-border shipping, or when carrier tracking numbers are not linked to PayPal orders. For active merchants like <em>Apex Home Goods</em>, this locks up thousands of dollars ($5,235.24) of operational working capital.
+      </p>
+      <p style="margin-bottom:0;">
+        <strong>Unhold</strong> is an autonomous multi-agent sentinel that pairs transaction event codes, reconciles carrier manifests, uploads tracking to PayPal Orders API, and slashes hold duration from <strong>21 days down to ~24 hours post-delivery</strong> (accelerating $1,869.39 by 12.4 days).
+      </p>
+    </div>
+
+    <h2>1. The 3 Specific Slack & Zapier Automation Moments</h2>
+    <p>
+      Unhold connects directly to your operations team's Slack channel via outbound Zapier webhooks. Zapier does not run continuously in the background—it is precision-triggered at <strong>three specific, high-impact operational moments</strong>:
+    </p>
+
+    <div class="moment-card moment-cash">
+      <div class="moment-header">
+        <span class="moment-title">⚡ Moment 1: Batch Tracking Uploaded to PayPal (Cash Acceleration)</span>
+        <span class="moment-badge">Event: tracking.batch_uploaded</span>
+      </div>
+      <p>
+        <strong>When it fires:</strong> Triggered the exact second the merchant clicks <code>[Upload 38 Matched Trackers]</code> in the Holds Ledger or AI Matcher tab.
+      </p>
+      <p>
+        <strong>What it does:</strong> Dispatches a rich Slack card to <code>#unhold-alerts</code> announcing that 38 orders were updated in PayPal, accelerating <strong>$1,869.39 USD</strong> by 12.4 days and boosting the merchant's Account Health Score from <strong>53 to 73 (Fair)</strong>.
+      </p>
+      <p style="font-size:12px;color:var(--text-muted);margin-bottom:0;">
+        <em>Demo Tip:</em> Point out your Slack notification arriving live right after clicking upload!
+      </p>
+    </div>
+
+    <div class="moment-card moment-fraud">
+      <div class="moment-header">
+        <span class="moment-title">🚨 Moment 2: Phishing Scam or Ghost Payment Intercepted</span>
+        <span class="moment-badge">Event: payment.fraud_detected</span>
+      </div>
+      <p>
+        <strong>When it fires:</strong> Triggered the exact second Payment Guard audits an inbound payment receipt email and discovers that the transaction ID is a <strong>404 nonexistent phantom capture</strong> (e.g. <code>CAP-FAKE-PHISHING-001</code>) or comes from a spoofed domain (<code>paypa1-security-alert.com</code>).
+      </p>
+      <p>
+        <strong>What it does:</strong> Immediately sends an emergency security alert to Slack: <em>"HALT SHIPMENT: Phantom payment notice detected for $820.00. Payment does not exist in PayPal."</em>
+      </p>
+      <p style="font-size:12px;color:var(--text-muted);margin-bottom:0;">
+        <em>Demo Tip:</em> In the Payment Guard tab, load the phishing sample and click verify—Slack will instantly alert your warehouse team.
+      </p>
+    </div>
+
+    <div class="moment-card moment-dispute">
+      <div class="moment-header">
+        <span class="moment-title">🤝 Moment 3: Autonomous A2A Dispute Settled</span>
+        <span class="moment-badge">Event: dispute.settled</span>
+      </div>
+      <p>
+        <strong>When it fires:</strong> Triggered when Unhold's Buyer Assurance agent successfully presents the <strong>RFC 9901 SD-JWT</strong> cryptographic delivery proof to the buyer's AI agent, issues a courtesy store coupon, and mutually withdraws the dispute.
+      </p>
+      <p>
+        <strong>What it does:</strong> Dispatches a Slack notification confirming that dispute <code>DISP-SEED-001</code> was closed amicably without human intervention, preventing chargeback fees and releasing withheld merchant funds.
+      </p>
+    </div>
+
+    <h2>2. System Architecture & Autonomous Agent Roles</h2>
+    <ul>
+      <li><strong>Ledger Scribe:</strong> Reconstructs PayPal's transaction history by pairing <code>T2107</code> (Payment Hold) with <code>T2108</code> (Hold Release) event codes into a single verified ledger of 106 records.</li>
+      <li><strong>Cash-Flow Strategist:</strong> Runs a 2,000-rollout Monte Carlo simulation forecaster and builds the dynamic Hold Waterfall schedule.</li>
+      <li><strong>AI Tracking Matcher:</strong> 3-tier matcher reconciling disparate carrier manifests (UPS, FedEx, USPS, DHL) using exact IDs, deterministic name/ZIP inversion, and phonetic AI nickname equivalence (e.g., <em>Adaeze $\to$ Ada</em>).</li>
+      <li><strong>Payment Guard:</strong> Audits inbound payment emails against live PayPal capture endpoints and enforces PayPal's <strong>$750 Signature Confirmation</strong> rule for Seller Protection.</li>
+      <li><strong>Dispute Negotiator:</strong> Enforces prompt injection defense barriers against untrusted buyer inputs and negotiates 4-turn A2A settlements using privacy-preserving SD-JWT tokens.</li>
+      <li><strong>Audit Officer:</strong> Maintains an immutable, SHA-256 sequential cryptographic hash chain verifying every single state transition from genesis.</li>
+    </ul>
+
+    <h2>3. Demonstration Walkthrough Sequence</h2>
+    <ol>
+      <li><strong>Cockpit Overview:</strong> Show $5,235.24 held balance, reconciled difference $0.00, and toggle the Hold Waterfall to demonstrate how funds advance by 2 weeks.</li>
+      <li><strong>Holds Ledger:</strong> Search and filter through the 106 holds using high-performance AG Grid Community 34.3.1.</li>
+      <li><strong>AI Tracking Matcher:</strong> Show Tier 1, Tier 2, and Tier 3 matched manifests. Click <code>[Upload 38 Matched Trackers]</code> to trigger PayPal Orders API and watch <strong>Slack Moment 1</strong> fire!</li>
+      <li><strong>Payment Guard:</strong> Load the counterfeit phishing email sample, click verify, and show how Unhold blocks the 404 ghost capture and fires <strong>Slack Moment 2</strong>.</li>
+      <li><strong>Disputes & A2A:</strong> Run the 4-turn autonomous negotiation, verify the RFC 9901 SD-JWT delivery proof, and watch <strong>Slack Moment 3</strong> settle the dispute.</li>
+      <li><strong>Audit Log:</strong> Click <code>[Verify Entire Hash Chain]</code> to prove all transactions are cryptographically signed and tamper-evident.</li>
+    </ol>
+
+  </main>
+
+</body>
+</html>

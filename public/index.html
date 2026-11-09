@@ -517,11 +517,8 @@
         <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M1.705 8.005a.75.75 0 0 1 .834.656 5.5 5.5 0 0 0 9.592 2.97l-1.204-1.204a.25.25 0 0 1 .177-.427h3.646a.25.25 0 0 1 .25.25v3.646a.25.25 0 0 1-.427.177l-1.38-1.38A7.002 7.002 0 0 1 1.05 8.84a.75.75 0 0 1 .656-.834ZM8 2.5a5.487 5.487 0 0 0-4.131 1.869l1.204 1.204A.25.25 0 0 1 4.896 6H1.25A.25.25 0 0 1 1 5.75V2.104a.25.25 0 0 1 .427-.177l1.38 1.38A7.002 7.002 0 0 1 14.95 7.16a.75.75 0 0 1-1.49.178A5.5 5.5 0 0 0 8 2.5Z"/></svg>
         Sync Sandbox
       </button>
-      <button class="btn" id="btnZapierPing" title="Send a real-time event ping to your Zapier webhook">
-        ⚡ Ping Zapier
-      </button>
-      <a href="/deck" class="btn" target="_blank">
-        Presentation Deck ↗
+      <a href="/doc" class="btn" target="_blank" title="Merchant System & Operating Documentation">
+        Documentation ↗
       </a>
     </div>
   </header>
@@ -635,9 +632,10 @@
           </div>
           <div style="display:flex;gap:10px;align-items:center;">
             <input type="text" class="form-control" id="gridSearch" placeholder="Search orders, items, buyers..." style="width:260px;">
-            <button class="btn btn-primary" id="btnUploadBatch">
+            <button class="btn btn-primary" id="btnUploadBatch" title="Uploads tracking to PayPal and dispatches real-time Slack alert card">
               ⚡ Upload 38 Matched Trackers
             </button>
+            <span class="chip chip-info" style="font-size:11px;" title="Automation Moment 1: Live Slack Notification">⚡ Moment 1: Dispatches to Slack</span>
           </div>
         </div>
 
@@ -778,6 +776,10 @@
             <button class="btn btn-primary" id="btnVerifyEmail" style="width:100%;justify-content:center;">
               Verify Against Live PayPal Sandbox
             </button>
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px;">
+              <span style="font-size:11px;color:var(--text-muted);">Audits live PayPal captures</span>
+              <span class="chip chip-bad" style="font-size:10.5px;" title="Automation Moment 2: Phishing Alert">🚨 Moment 2: Security Alert to Slack</span>
+            </div>
           </div>
 
           <div>
@@ -799,9 +801,12 @@
           <div class="card-title">
             <span>Autonomous A2A Dispute Defense & RFC 9901 SD-JWT Settlement</span>
           </div>
-          <button class="btn btn-primary" id="btnRunA2A">
-            Simulate 4-Turn A2A Negotiation
-          </button>
+          <div style="display:flex;align-items:center;gap:10px;">
+            <span class="chip chip-good" style="font-size:11px;" title="Automation Moment 3: Mutual Settlement Alert">🤝 Moment 3: Settlement Alert to Slack</span>
+            <button class="btn btn-primary" id="btnRunA2A">
+              Simulate 4-Turn A2A Negotiation
+            </button>
+          </div>
         </div>
 
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;">
