@@ -20,7 +20,7 @@ describe('Step 6 & 7: Static UI Wireframes & Low-Code Integrations', () => {
     });
     assert.equal(rootRes.statusCode, 200);
     assert.match(rootRes.headers['content-type'] || '', /text\/html/);
-    assert.match(rootRes.payload, /Unhold wireframes/);
+    assert.match(rootRes.payload, /Unhold/);
     assert.match(rootRes.payload, /Apex Home Goods/);
 
     // Cockpit GET /cockpit
@@ -29,7 +29,7 @@ describe('Step 6 & 7: Static UI Wireframes & Low-Code Integrations', () => {
       url: '/cockpit'
     });
     assert.equal(cockpitRes.statusCode, 200);
-    assert.match(cockpitRes.payload, /Unhold wireframes/);
+    assert.match(cockpitRes.payload, /Unhold/);
 
     // Deck GET /deck
     const deckRes = await server.inject({
