@@ -1,0 +1,59 @@
+version: "1.0"
+pod:
+  id: "unhold-paypal-sentinel"
+  name: "Unhold Autonomous Cash-Flow & Payment Protection Pod"
+  description: "Autonomous multi-agent system resolving PayPal seller holds, tracking uploads, and dispute defense"
+  runtime: "nodejs-20"
+  port: 10000
+  entrypoint: "dist/server.js"
+  health_check: "/health"
+
+team:
+  agents:
+    - id: "agt-ledger-scribe"
+      name: "Ledger Scribe"
+      role: "Rebuilds and reconciles 106 PayPal holds using T2107/T2108 event code pairing"
+      endpoint: "GET /api/holds"
+    - id: "agt-cashflow-strategist"
+      name: "Cash-Flow Strategist"
+      role: "Builds hold waterfall, 6-driver breakdown, and 2,000-run Monte Carlo forecaster"
+      endpoint: "GET /api/waterfall"
+    - id: "agt-tracking-matcher"
+      name: "AI Tracking Matcher"
+      role: "3-tier carrier manifest matching and idempotent PayPal tracking uploader"
+      endpoint: "POST /api/manifests/upload"
+    - id: "agt-safe-to-ship"
+      name: "Payment Guard Gatekeeper"
+      role: "Inbound email phishing auditor and pre-flight Seller Protection verifier"
+      endpoint: "POST /api/payment-guard/verify-email"
+    - id: "agt-dispute-negotiator"
+      name: "Dispute Defense & A2A Negotiator"
+      role: "Untrusted prompt injection defense and 4-turn RFC 9901 SD-JWT autonomous settlement"
+      endpoint: "POST /api/disputes/{id}/negotiate"
+    - id: "agt-audit-officer"
+      name: "Tamper-Evident Audit Officer"
+      role: "Maintains SHA-256 cryptographic hash chain verifying all state transitions"
+      endpoint: "GET /api/audit"
+
+integrations:
+  paypal:
+    environment: "sandbox"
+    apis:
+      - "POST /v2/checkout/orders/{id}/track"
+      - "GET /v2/checkout/orders/{id}"
+      - "GET /v2/payments/captures/{id}"
+      - "GET /v1/reporting/transactions"
+      - "GET /v1/reporting/balances"
+      - "POST /v1/notifications/verify-webhook-signature"
+  zapier:
+    webhook_enabled: true
+    events:
+      - "tracking.batch_uploaded"
+      - "dispute.settled"
+      - "payment.fraud_detected"
+  ag_grid:
+    component: "AG Grid Community 34.3.1"
+    license_type: "enterprise-trial"
+  render:
+    blueprint: "render.yaml"
+    service_type: "web"

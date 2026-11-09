@@ -9,6 +9,7 @@ import type { LedgerDB } from '../db/ledger_db.js';
 import type { DisputeRecord } from '../types/ledger.js';
 import { analyzePromptInjection } from './prompt_guard.js';
 import { issueDeliverySDJWT, type DeliveryProofPayload } from './sdjwt.js';
+import { dispatchZapierEvent } from './lowcode_dispatcher.js';
 
 export type NegotiationState =
   | 'OPENED'
@@ -236,6 +237,23 @@ export async function runAutonomousDisputeSettlement(
     result: 'RESOLVED',
     detail: `Amicable settlement reached for order ${dispute.order_id}; SD-JWT proof verified and dispute withdrawn`
   });
+
+  if (process.env.ZAPIER_WEBHOOK_URL) {
+    try {
+      await dispatchZapierEvent({
+        event: 'dispute.settled',
+        data: {
+          dispute_id: dispute.dispute_id,
+          order_id: dispute.order_id,
+          state: 'SETTLED',
+          concession_amount_usd: 10.0,
+          coupon_code: couponCode
+        }
+      });
+    } catch {
+      // Non-blocking
+    }
+  }
 
   return {
     session_id: sessionId,

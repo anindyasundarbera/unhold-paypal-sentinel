@@ -1,5 +1,6 @@
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
+import fastifyStatic from '@fastify/static';
 import { readFileSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
@@ -20,6 +21,12 @@ import {
   auditPreFlightSellerProtection,
   type PreFlightAuditParams
 } from './engine/payment_guard.js';
+import {
+  dispatchZapierEvent,
+  getAstropodsPodSpec,
+  queryAstropodsGateway,
+  type ZapierEventPayload
+} from './engine/lowcode_dispatcher.js';
 import type { CarrierManifestRecord, DisputeRecord } from './types/ledger.js';
 import type { WebhookVerificationRequest } from './types/paypal.js';
 
@@ -60,6 +67,25 @@ export async function createServer(customDb?: LedgerDB, customPayPal?: PayPalCli
   await fastify.register(cors, {
     origin: true
   });
+
+  // Serve static UI wireframes and workbench assets
+  const publicPath = join(__dirname, '../public');
+  if (existsSync(publicPath)) {
+    await fastify.register(fastifyStatic, {
+      root: publicPath,
+      prefix: '/',
+      index: ['index.html'],
+      decorateReply: true
+    });
+
+    fastify.get('/cockpit', async (req, reply) => {
+      return reply.sendFile('index.html');
+    });
+
+    fastify.get('/deck', async (req, reply) => {
+      return reply.sendFile('deck.html');
+    });
+  }
 
   // Preserve raw body Buffer for webhook signature verification
   fastify.addContentTypeParser(
@@ -245,6 +271,22 @@ export async function createServer(customDb?: LedgerDB, customPayPal?: PayPalCli
 
   fastify.post('/api/audit/verify', async () => {
     return db.verifyLedgerAuditChain();
+  });
+
+  // --- Low-Code Sponsor Integrations (Zapier & Astropods) ---
+
+  fastify.post('/api/lowcode/zapier/trigger', async (req) => {
+    const body = (req.body as ZapierEventPayload) || { event: 'test.ping', data: {} };
+    return dispatchZapierEvent(body);
+  });
+
+  fastify.get('/api/lowcode/astropods/spec', async () => {
+    return getAstropodsPodSpec();
+  });
+
+  fastify.post('/api/lowcode/astropods/query', async (req) => {
+    const body = (req.body as { prompt?: string; model?: string }) || {};
+    return queryAstropodsGateway(body.prompt || 'Hello Unhold Agent Pod', body.model);
   });
 
   // --- PayPal Real Webhook Receiver ---

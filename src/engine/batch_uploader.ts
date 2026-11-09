@@ -7,6 +7,7 @@
 
 import type { LedgerDB } from '../db/ledger_db.js';
 import type { PayPalClient } from '../paypal/client.js';
+import { dispatchZapierEvent } from './lowcode_dispatcher.js';
 
 export interface BatchUploadOptions {
   autoOnly?: boolean;
@@ -217,6 +218,23 @@ export async function executeBatchTrackingUpload(
 
   const summaryAfter = ledger.getSummary();
   const avgDaysSaved = totalUploaded > 0 ? Number((totalDaysSavedSum / totalUploaded).toFixed(1)) : 0;
+
+  if (totalUploaded > 0 && process.env.ZAPIER_WEBHOOK_URL) {
+    try {
+      await dispatchZapierEvent({
+        event: 'tracking.batch_uploaded',
+        data: {
+          total_uploaded: totalUploaded,
+          total_usd_accelerated: Number(totalAcceleratedUsd.toFixed(2)),
+          avg_days_saved: avgDaysSaved,
+          health_score_before: summaryBefore.health_score,
+          health_score_after: summaryAfter.health_score
+        }
+      });
+    } catch {
+      // Non-blocking for batch upload
+    }
+  }
 
   return {
     total_candidates: candidates.length,

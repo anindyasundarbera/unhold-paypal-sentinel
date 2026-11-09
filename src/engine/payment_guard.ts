@@ -8,6 +8,7 @@
 
 import type { PayPalClient } from '../paypal/client.js';
 import type { LedgerDB } from '../db/ledger_db.js';
+import { dispatchZapierEvent } from './lowcode_dispatcher.js';
 
 export interface ParsedPaymentNotice {
   sender_email?: string;
@@ -267,6 +268,18 @@ export async function verifyPaymentAuthenticity(
   // Evaluate Verdict
   if (!captureExists || redFlags.some((rf) => rf.includes('404'))) {
     const summary = `FRAUD ALERT: Blocked counterfeit payment! Transaction ID ${txnId} was not found on PayPal (404). Do NOT dispatch merchandise.`;
+
+    if (process.env.ZAPIER_WEBHOOK_URL) {
+      dispatchZapierEvent({
+        event: 'payment.fraud_detected',
+        data: {
+          transaction_id: txnId,
+          claimed_amount: claimedAmount,
+          reason: 'Capture not found on PayPal (404)',
+          red_flags: redFlags
+        }
+      }).catch(() => {});
+    }
 
     let auditEntry: { block_id: number; hash: string } | undefined;
     if (ledger) {
