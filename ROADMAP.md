@@ -97,22 +97,29 @@
 
 ---
 
-### ⏳ Step 5: Payment Guard (Anti-Scam & Pre-Flight) (NEXT)
-- [ ] Email parser extracting transaction IDs and amounts from payment notices.
-- [ ] PayPal live capture check (`GET /v2/payments/captures/{id}`); 404 block & phishing report.
-- [ ] Pre-flight Seller Protection auditor ($750 signature threshold, address match).
+### ✅ Step 5: Payment Guard (Anti-Scam & Pre-Flight) (COMPLETED)
+- [x] Phishing & Fake Payment Parser (`src/engine/payment_guard.ts`):
+  - Extracts sender domain, transaction/capture IDs, amounts, currencies, and urgency patterns.
+  - Detects spoofed non-PayPal corporate domains (e.g. `intl-paypal-verification.com`).
+- [x] Live PayPal Capture Verifier (`verifyPaymentAuthenticity`):
+  - Queries PayPal REST API (`GET /v2/payments/captures/{id}`).
+  - Intercepts 404 nonexistent phantom payments, blocks fraudulent shipment dispatch, and issues forensic scam reports.
+  - Detects payment amount tampering (e.g. email claiming $850 vs real capture of $8.50).
+  - Appends security alerts to SHA-256 tamper-evident audit chain.
+- [x] Pre-Flight Seller Protection Auditor (`auditPreFlightSellerProtection`):
+  - Enforces PayPal's mandatory $750 signature confirmation rule (`amount >= 750`).
+  - Verifies delivery destination against PayPal checkout address to prevent unconfirmed redirect scam losses.
+  - Generates pre-flight checklists and action recommendations (`UPGRADE_TO_SIGNATURE_CONFIRMATION`, `CANCEL_LABEL_SHIP_ONLY_TO_PAYPAL_ADDRESS`).
+- [x] REST Endpoints in `src/server.ts`:
+  - `POST /api/payment-guard/verify-email` — Parse notice and verify live capture.
+  - `POST /api/payment-guard/preflight` — Pre-flight Seller Protection auditor.
+- [x] Automated test suite passing (49/49 tests across 13 suites in 3.8s).
 
 ---
 
-### ⏳ Step 6: Render Cloud Deployment & Blueprint
-- [ ] Create `render.yaml` Blueprint (Web Service + Managed PostgreSQL + Cron Workflow).
-- [ ] Expose public HTTPS webhook listener (`POST /webhooks/paypal`).
-- [ ] Dual-dialect DB adapter (SQLite for local offline runs, PostgreSQL on Render).
-
----
-
-### ⏳ Step 7: AG Grid & AG Studio Cockpit UI
-- [ ] Mount AG Grid React dashboard.
-- [ ] Custom timeline cell renderer (start date, today, 21-day boundary, expedited release).
-- [ ] Embed AG Studio Hold Waterfall and Cash Range widgets.
-- [ ] Interactive audit chain verification drawer.
+### ⏳ Step 6 & 7: AG Grid Cockpit Dashboard & Low-Code Integrations (NEXT)
+- [ ] AG Grid / AG Charts Seller Cockpit UI.
+- [ ] Custom timeline cell renderer (held date, today, 21-day outer limit, expedited release date).
+- [ ] Hold Waterfall & Monte Carlo probability visualization.
+- [ ] Postman collection generation for Devpost submission.
+- [ ] Zapier & Astropods low-code connector endpoints.

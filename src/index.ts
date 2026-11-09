@@ -16,4 +16,5 @@ export * from './engine/batch_uploader.js';
 export * from './engine/prompt_guard.js';
 export * from './engine/sdjwt.js';
 export * from './engine/a2a_negotiator.js';
+export * from './engine/payment_guard.js';
 export * from './server.js';

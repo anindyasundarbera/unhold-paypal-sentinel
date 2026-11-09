@@ -14,6 +14,12 @@ import { executeBatchTrackingUpload, type BatchUploadOptions } from './engine/ba
 import { analyzePromptInjection } from './engine/prompt_guard.js';
 import { issueDeliverySDJWT, verifyDeliverySDJWT, type DeliveryProofPayload } from './engine/sdjwt.js';
 import { runAutonomousDisputeSettlement, type SettlementOptions } from './engine/a2a_negotiator.js';
+import {
+  parsePaymentNotification,
+  verifyPaymentAuthenticity,
+  auditPreFlightSellerProtection,
+  type PreFlightAuditParams
+} from './engine/payment_guard.js';
 import type { CarrierManifestRecord, DisputeRecord } from './types/ledger.js';
 import type { WebhookVerificationRequest } from './types/paypal.js';
 
@@ -210,6 +216,22 @@ export async function createServer(customDb?: LedgerDB, customPayPal?: PayPalCli
       publicKeyJwk: JsonWebKey;
     };
     return verifyDeliverySDJWT(body.sdJwt, body.publicKeyJwk);
+  });
+
+  // --- Payment Guard (Anti-Scam & Pre-Flight) Endpoints ---
+
+  fastify.post('/api/payment-guard/verify-email', async (req) => {
+    const body = req.body as {
+      rawEmail: string;
+      headers?: { from?: string; subject?: string };
+    };
+    const parsed = parsePaymentNotification(body.rawEmail || '', body.headers);
+    return verifyPaymentAuthenticity(parsed, paypal, db);
+  });
+
+  fastify.post('/api/payment-guard/preflight', async (req) => {
+    const body = req.body as PreFlightAuditParams;
+    return auditPreFlightSellerProtection(body, db);
   });
 
   fastify.get('/api/audit', async () => {
