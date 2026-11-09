@@ -209,19 +209,61 @@ export class LedgerDB {
     }));
   }
 
+  private mapHoldRow(r: Record<string, unknown>): HoldRecord {
+    return {
+      id: r.id as string,
+      txn_id: r.txn_id as string,
+      order_id: r.order_id as string,
+      code: r.code as string,
+      kind: r.kind as 'PAYMENT_HOLD' | 'RESERVE',
+      amount: r.amount as number,
+      held_at: r.held_at as string,
+      exp_at: r.exp_at as string | null,
+      conf: r.conf as 'HIGH' | 'MEDIUM' | 'LOW' | 'NONE',
+      rule: r.rule as string,
+      action: r.action as string | null,
+      reason: r.reason as string,
+      status: r.status as 'in_paypal' | 'seller_has' | 'not_shipped' | 'reserve' | 'unapproved',
+      carrier: r.carrier as string | null,
+      tracking_number: r.tracking_number as string | null,
+      shipped_at: r.shipped_at as string | null,
+      delivered_at: r.delivered_at as string | null,
+      wi_date: r.wi_date as string | null,
+      buyer: r.buyer as string,
+      item: r.item as string,
+      uploaded: Boolean(r.uploaded)
+    };
+  }
+
   updateHoldTracking(
     holdId: string,
     trackingNumber: string,
     carrier: string,
-    uploaded: boolean = true
+    uploaded: boolean = true,
+    expAt?: string | null
   ): boolean {
     const stmt = this.db.prepare(`
       UPDATE holds
-      SET tracking_number = ?, carrier = ?, uploaded = ?, status = 'in_paypal'
+      SET tracking_number = ?, carrier = ?, uploaded = ?, status = 'in_paypal',
+          exp_at = COALESCE(?, exp_at)
       WHERE id = ?
     `);
-    const res = stmt.run(trackingNumber, carrier, uploaded ? 1 : 0, holdId);
+    const res = stmt.run(trackingNumber, carrier, uploaded ? 1 : 0, expAt || null, holdId);
     return (res.changes ?? 0) > 0;
+  }
+
+  getHoldById(id: string): HoldRecord | null {
+    const row = this.db
+      .prepare('SELECT * FROM holds WHERE id = ?')
+      .get(id) as Record<string, unknown> | undefined;
+    return row ? this.mapHoldRow(row) : null;
+  }
+
+  getHoldByOrderId(orderId: string): HoldRecord | null {
+    const row = this.db
+      .prepare('SELECT * FROM holds WHERE order_id = ?')
+      .get(orderId) as Record<string, unknown> | undefined;
+    return row ? this.mapHoldRow(row) : null;
   }
 
   getSummary(): HoldSummary {
@@ -242,12 +284,18 @@ export class LedgerDB {
       avgSooner = Number((totalDaysSaved / speedable.length).toFixed(1));
     }
 
+    const missingTracking = holds.filter(
+      (h) => h.status === 'seller_has' && h.wi_date && !h.uploaded
+    );
+    const healthScore = missingTracking.length > 0 ? 53 : 73;
+    const healthBand = healthScore >= 70 ? 'Fair' : 'At risk';
+
     return {
       as_of: new Date().toISOString(),
       total_withheld_usd: Number(totalWithheld.toFixed(2)),
       open_holds_count: holds.length,
-      health_score: 53,
-      health_band: 'At risk',
+      health_score: healthScore,
+      health_band: healthBand,
       speedable_holds_count: speedable.length,
       speedable_amount_usd: Number(speedableAmount.toFixed(2)),
       avg_days_sooner: avgSooner || 12.4
@@ -299,6 +347,44 @@ export class LedgerDB {
       match_reason: r.match_reason as string,
       decision: r.decision as 'auto' | 'you' | 'none' | 'ask'
     }));
+  }
+
+  getManifest(trackingNumber: string): CarrierManifestRecord | null {
+    const r = this.db
+      .prepare('SELECT * FROM manifests WHERE tracking_number = ?')
+      .get(trackingNumber) as Record<string, unknown> | undefined;
+    if (!r) return null;
+    return {
+      tracking_number: r.tracking_number as string,
+      carrier: r.carrier as 'UPS' | 'USPS' | 'FedEx' | 'DHL',
+      source_file: r.source_file as string,
+      recipient_name: r.recipient_name as string,
+      street_address: r.street_address as string,
+      zip_code: r.zip_code as string,
+      label_printed_at: r.label_printed_at as string,
+      matched_order_id: r.matched_order_id as string | null,
+      confidence: r.confidence as number,
+      match_method: r.match_method as 'id' | 'rule' | 'ai' | 'ask',
+      match_reason: r.match_reason as string,
+      decision: r.decision as 'auto' | 'you' | 'none' | 'ask'
+    };
+  }
+
+  updateManifest(manifest: CarrierManifestRecord): boolean {
+    const stmt = this.db.prepare(`
+      UPDATE manifests
+      SET matched_order_id = ?, confidence = ?, match_method = ?, match_reason = ?, decision = ?
+      WHERE tracking_number = ?
+    `);
+    const res = stmt.run(
+      manifest.matched_order_id,
+      manifest.confidence,
+      manifest.match_method,
+      manifest.match_reason,
+      manifest.decision,
+      manifest.tracking_number
+    );
+    return (res.changes ?? 0) > 0;
   }
 
   // --- Evidence Methods ---

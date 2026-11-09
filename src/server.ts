@@ -9,6 +9,9 @@ import { PayPalClient } from './paypal/client.js';
 import { generateWhyHeldReport } from './engine/why_held.js';
 import { buildHoldWaterfall } from './engine/waterfall.js';
 import { simulateCashReleases, planCashGoal } from './engine/monte_carlo.js';
+import { matchAllManifests } from './engine/tracking_matcher.js';
+import { executeBatchTrackingUpload, type BatchUploadOptions } from './engine/batch_uploader.js';
+import type { CarrierManifestRecord } from './types/ledger.js';
 import type { WebhookVerificationRequest } from './types/paypal.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -144,6 +147,18 @@ export async function createServer(customDb?: LedgerDB, customPayPal?: PayPalCli
     return {
       manifests: db.getAllManifests()
     };
+  });
+
+  fastify.post('/api/manifests/match', async (req) => {
+    const body = (req.body as { manifests?: CarrierManifestRecord[] }) || {};
+    const manifests = body.manifests || db.getAllManifests();
+    const holds = db.getAllHolds();
+    return matchAllManifests(manifests, holds);
+  });
+
+  fastify.post('/api/manifests/upload', async (req) => {
+    const body = (req.body as BatchUploadOptions) || {};
+    return executeBatchTrackingUpload(db, paypal, body);
   });
 
   fastify.get('/api/audit', async () => {

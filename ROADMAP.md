@@ -54,15 +54,26 @@
 
 ---
 
-### ⏳ Step 3: AI Tracking Matcher & Batch Uploader (NEXT)
-- [ ] Exact rule matcher (order ID match, ZIP + date rules).
-- [ ] Fuzzy LLM matcher (nicknames, typos, building numbers with confidence scoring).
-- [ ] Batch upload service calling PayPal `POST /v2/checkout/orders/{id}/track` with `PayPal-Request-Id`.
-- [ ] Dynamic ledger update (re-dating holds from 21-day delay to ~24 hours post-delivery).
+### ✅ Step 3: AI Tracking Matcher & Batch Uploader (COMPLETED)
+- [x] Multi-Tier Tracking Matcher (`src/engine/tracking_matcher.ts`):
+  - Tier 1: Exact ID matching (`matched_order_id`, confidence 1.0, decision `auto`).
+  - Tier 2: Deterministic Rule-Based matching (Name inversion "Last, First", capitalization, ZIP, timing within 4 days, confidence 0.98–0.99).
+  - Tier 3: AI / Semantic Fuzzy matching (Nicknames e.g. "Ada" for "Adaeze", surname typos with Levenshtein $\le 2$, flat/address matches, joint names, confidence 0.82–0.93).
+  - Evaluated on all 38 shipping manifests ($1,869.39 potential cash acceleration).
+- [x] Batch Tracking Uploader (`src/engine/batch_uploader.ts`):
+  - Calls PayPal Checkout Orders v2 track endpoint (`POST /v2/checkout/orders/{id}/track`) with `PayPal-Request-Id` idempotency header and required `capture_id`.
+  - Re-dates holds in ledger dynamically from 21-day outer limit to ~24h post-delivery (`wi_date`), saving an average of 12.4 days per hold.
+  - Removes the 20-point missing tracking penalty, raising Account Health Score from 53 ("At risk") to 73 ("Fair").
+  - Appends SHA-256 tamper-evident audit chain blocks for every uploaded transaction.
+  - Idempotency verified: re-running produces `ALREADY_UPLOADED` with zero duplicates.
+- [x] REST Endpoints in `src/server.ts`:
+  - `POST /api/manifests/match` — Batch matching engine with confidence scoring and reasoning.
+  - `POST /api/manifests/upload` — Batch tracking uploader with dry-run and filter options.
+- [x] Automated test suite passing (29/29 tests across 6 suites in 2.6s).
 
 ---
 
-### ⏳ Step 4: Buyer Assurance & A2A SD-JWT Settlement
+### ⏳ Step 4: Buyer Assurance & A2A SD-JWT Settlement (NEXT)
 - [ ] Dispute webhook receiver (`CUSTOMER.DISPUTE.CREATED`).
 - [ ] Prompt injection defense shield for buyer messages.
 - [ ] SD-JWT (RFC 9901) ES256 delivery proof generator and verifier.

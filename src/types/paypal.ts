@@ -70,6 +70,7 @@ export interface PayPalTracker {
 export interface CreateTrackerRequest {
   tracking_number: string;
   carrier: string;
+  capture_id?: string;
   notify_payer?: boolean;
 }
 

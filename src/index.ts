@@ -11,4 +11,6 @@ export * from './paypal/client.js';
 export * from './engine/why_held.js';
 export * from './engine/monte_carlo.js';
 export * from './engine/waterfall.js';
+export * from './engine/tracking_matcher.js';
+export * from './engine/batch_uploader.js';
 export * from './server.js';
