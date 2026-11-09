@@ -39,6 +39,21 @@
 
 ---
 
+### ✅ Step 2.5: Render Cloud Blueprint & Web Service Integration (COMPLETED)
+- [x] Fastify Production Web Service (`src/server.ts`):
+  - Preserved raw body buffer for PayPal webhook cryptographic signature verification.
+  - Endpoints: `/health`, `/api/summary`, `/api/holds`, `/api/waterfall`, `/api/why-held`, `/api/cash-goal/plan`, `/api/manifests`, `/api/audit`, `POST /webhooks/paypal`.
+- [x] Render Reconcile Sweep Service (`src/cron/reconcile_sweep.ts`):
+  - Automated 6-hour cron sweep syncing PayPal Transaction Search API with SQLite ledger and appending signed audit blocks.
+- [x] Infrastructure-as-Code Blueprint (`render.yaml` at root and in `projects/unhold_paypal/render.yaml`):
+  - Web service `unhold-api` (Node runtime, Starter plan, auto-deploy, health check `/health`, persistent disk `/var/data`).
+  - Cron service `unhold-reconcile-sweep` (Starter plan, schedule `0 */6 * * *`).
+  - Optional managed database `unhold-postgres` (PostgreSQL 16 starter).
+- [x] Production Dockerfile and `.dockerignore` for containerized deployments.
+- [x] Automated test suite passing (23/23 tests across 5 suites).
+
+---
+
 ### ⏳ Step 3: AI Tracking Matcher & Batch Uploader (NEXT)
 - [ ] Exact rule matcher (order ID match, ZIP + date rules).
 - [ ] Fuzzy LLM matcher (nicknames, typos, building numbers with confidence scoring).

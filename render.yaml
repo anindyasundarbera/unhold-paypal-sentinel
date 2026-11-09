@@ -1,0 +1,71 @@
+# Render Infrastructure-as-Code Blueprint for Unhold PayPal
+# Sponsoring Partner: Render.com (utilizing Render Starter tier & $50 hackathon credit)
+# Docs: https://render.com/docs/blueprint-spec
+
+services:
+  # 1. Main API Web Service
+  - type: web
+    name: unhold-api
+    runtime: node
+    plan: starter
+    region: oregon
+    buildCommand: npm install && npm run build
+    startCommand: npm run start
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 10000
+      - key: HOST
+        value: 0.0.0.0
+      - key: PAYPAL_ENVIRONMENT
+        value: sandbox
+      - key: PAYPAL_CLIENT_ID
+        sync: false
+      - key: PAYPAL_CLIENT_SECRET
+        sync: false
+      - key: PAYPAL_WEBHOOK_ID
+        sync: false
+      - key: DATABASE_PATH
+        value: /var/data/unhold.db
+      - key: ASTROPODS_API_KEY
+        sync: false
+      - key: ZAPIER_WEBHOOK_URL
+        sync: false
+    disk:
+      name: unhold-data
+      mountPath: /var/data
+      sizeGB: 1
+
+  # 2. Automated 6-Hour Reconciliation Sweep (Render Cron Service)
+  - type: cron
+    name: unhold-reconcile-sweep
+    runtime: node
+    plan: starter
+    region: oregon
+    schedule: "0 */6 * * *"
+    buildCommand: npm install && npm run build
+    startCommand: npm run sweep
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PAYPAL_ENVIRONMENT
+        value: sandbox
+      - key: PAYPAL_CLIENT_ID
+        sync: false
+      - key: PAYPAL_CLIENT_SECRET
+        sync: false
+      - key: PAYPAL_WEBHOOK_ID
+        sync: false
+      - key: DATABASE_PATH
+        value: /var/data/unhold.db
+
+# 3. Optional Managed Relational Database
+databases:
+  - name: unhold-postgres
+    plan: starter
+    databaseName: unhold_ledger
+    user: unhold_admin
+    region: oregon

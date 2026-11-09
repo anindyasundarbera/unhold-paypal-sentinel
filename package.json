@@ -6,8 +6,11 @@
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {
+    "start": "node dist/server.js",
+    "sweep": "node dist/cron/reconcile_sweep.js",
     "build": "tsc && cp src/seed/unhold_seed.json dist/seed/",
     "test": "tsx --test tests/*.test.ts",
+    "register-webhook": "tsx src/paypal/register_webhook.ts",
     "dev": "tsx watch src/index.ts"
   },
   "keywords": [
@@ -24,5 +27,11 @@
     "@types/node": "^24.19.2",
     "tsx": "^4.23.15",
     "typescript": "^5.9.3"
+  },
+  "dependencies": {
+    "@fastify/cors": "^11.4.1",
+    "@types/pg": "^8.23.1",
+    "fastify": "^5.12.8",
+    "pg": "^8.23.1"
   }
 }

@@ -1,0 +1,263 @@
+import Fastify from 'fastify';
+import cors from '@fastify/cors';
+import { readFileSync, existsSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
+import { LedgerDB } from './db/ledger_db.js';
+import { seedLedger } from './seed/seeder.js';
+import { PayPalClient } from './paypal/client.js';
+import { generateWhyHeldReport } from './engine/why_held.js';
+import { buildHoldWaterfall } from './engine/waterfall.js';
+import { simulateCashReleases, planCashGoal } from './engine/monte_carlo.js';
+import type { WebhookVerificationRequest } from './types/paypal.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+
+// Read .env if present
+const candidateEnvPaths = [
+  join(process.cwd(), '.env'),
+  join(__dirname, '../.env'),
+  join(__dirname, '../../.env'),
+  join(__dirname, '../../../.env')
+];
+for (const p of candidateEnvPaths) {
+  if (existsSync(p)) {
+    const envContent = readFileSync(p, 'utf8');
+    for (const line of envContent.split('\n')) {
+      if (line.includes('=') && !line.startsWith('#')) {
+        const idx = line.indexOf('=');
+        const key = line.slice(0, idx).trim();
+        const val = line.slice(idx + 1).trim();
+        if (!process.env[key]) {
+          process.env[key] = val;
+        }
+      }
+    }
+  }
+}
+
+const PORT = Number(process.env.PORT || 10000);
+const HOST = process.env.HOST || '0.0.0.0';
+
+export async function createServer(customDb?: LedgerDB, customPayPal?: PayPalClient) {
+  const fastify = Fastify({
+    logger: process.env.NODE_ENV !== 'test'
+  });
+
+  await fastify.register(cors, {
+    origin: true
+  });
+
+  // Preserve raw body Buffer for webhook signature verification
+  fastify.addContentTypeParser(
+    'application/json',
+    { parseAs: 'buffer' },
+    (req, body, done) => {
+      try {
+        (req as unknown as { rawBody: Buffer }).rawBody = body as Buffer;
+        const json = JSON.parse((body as Buffer).toString('utf8'));
+        done(null, json);
+      } catch (err) {
+        done(err as Error, undefined);
+      }
+    }
+  );
+
+  const db = customDb || new LedgerDB(process.env.DATABASE_PATH || ':memory:');
+  // Seed the ledger if empty
+  if (db.getAllHolds().length === 0) {
+    seedLedger(db);
+  }
+
+  const clientId = process.env.PAYPAL_CLIENT_ID || 'sandbox_client_id';
+  const clientSecret = process.env.PAYPAL_CLIENT_SECRET || 'sandbox_client_secret';
+  const webhookId = process.env.PAYPAL_WEBHOOK_ID;
+
+  const paypal =
+    customPayPal ||
+    new PayPalClient({
+      clientId,
+      clientSecret,
+      environment: (process.env.PAYPAL_ENVIRONMENT as 'sandbox' | 'live') || 'sandbox',
+      webhookId
+    });
+
+  // --- Health Check for Render ---
+  fastify.get('/health', async () => {
+    return {
+      status: 'ok',
+      service: 'unhold-api',
+      environment: process.env.NODE_ENV || 'development',
+      timestamp: new Date().toISOString()
+    };
+  });
+
+  // --- Ledger & Analytics Endpoints ---
+
+  fastify.get('/api/summary', async () => {
+    return db.getSummary();
+  });
+
+  fastify.get('/api/holds', async (req) => {
+    const query = req.query as { status?: string };
+    return {
+      holds: db.getAllHolds(query.status)
+    };
+  });
+
+  fastify.get('/api/waterfall', async (req) => {
+    const query = req.query as { asOf?: string };
+    const holds = db.getAllHolds();
+    return buildHoldWaterfall(holds, query.asOf || '2026-11-09T18:00:00Z');
+  });
+
+  fastify.get('/api/why-held', async () => {
+    const holds = db.getAllHolds();
+    const evidence = db.getAllEvidence();
+    // Default sales history from seed
+    const seedPath = join(__dirname, 'seed/unhold_seed.json');
+    let sales: Array<{ d: string; v: number }> = [];
+    if (existsSync(seedPath)) {
+      const data = JSON.parse(readFileSync(seedPath, 'utf8'));
+      sales = data.sales || [];
+    }
+    return generateWhyHeldReport(holds, sales, evidence);
+  });
+
+  fastify.post('/api/cash-goal/plan', async (req) => {
+    const body = req.body as {
+      goalAmount?: number;
+      goalDay?: number;
+      confidence?: number;
+    };
+    const holds = db.getAllHolds();
+    return planCashGoal(
+      holds,
+      body.goalAmount || 4500,
+      body.goalDay ?? 11,
+      body.confidence || 0.8
+    );
+  });
+
+  fastify.get('/api/manifests', async () => {
+    return {
+      manifests: db.getAllManifests()
+    };
+  });
+
+  fastify.get('/api/audit', async () => {
+    const chain = db.getAuditChain();
+    const verification = db.verifyLedgerAuditChain();
+    return {
+      chain,
+      verification
+    };
+  });
+
+  fastify.post('/api/audit/verify', async () => {
+    return db.verifyLedgerAuditChain();
+  });
+
+  // --- PayPal Real Webhook Receiver ---
+
+  fastify.post('/webhooks/paypal', async (req, reply) => {
+    const headers = req.headers;
+    const body = req.body as Record<string, unknown>;
+    const rawBodyBuffer = (req as unknown as { rawBody?: Buffer }).rawBody;
+
+    const eventType = (body.event_type as string) || 'UNKNOWN_EVENT';
+    const eventId = (body.id as string) || 'UNKNOWN_ID';
+    const resource = (body.resource as Record<string, unknown>) || {};
+
+    let verificationPassed = false;
+
+    // Verify webhook signature if headers present
+    if (
+      headers['paypal-auth-algo'] &&
+      headers['paypal-cert-url'] &&
+      headers['paypal-transmission-id'] &&
+      headers['paypal-transmission-sig'] &&
+      headers['paypal-transmission-time']
+    ) {
+      try {
+        const verifyReq: WebhookVerificationRequest = {
+          auth_algo: headers['paypal-auth-algo'] as string,
+          cert_url: headers['paypal-cert-url'] as string,
+          transmission_id: headers['paypal-transmission-id'] as string,
+          transmission_sig: headers['paypal-transmission-sig'] as string,
+          transmission_time: headers['paypal-transmission-time'] as string,
+          webhook_id: webhookId || '',
+          webhook_event: body
+        };
+
+        const result = await paypal.verifyWebhookSignature(verifyReq);
+        verificationPassed = result.verification_status === 'SUCCESS';
+      } catch (err) {
+        fastify.log.warn(`Webhook signature check warning: ${(err as Error).message}`);
+        // In local/sandbox development without live tunnel, note fallback
+        verificationPassed = process.env.NODE_ENV === 'test' || !webhookId;
+      }
+    } else {
+      // Direct simulator or development post
+      verificationPassed = process.env.NODE_ENV !== 'production';
+    }
+
+    // Process specific PayPal events
+    let actionResult = 'acknowledged';
+    let detail = `Ingested event ${eventType} (${eventId})`;
+
+    if (eventType === 'PAYMENT.CAPTURE.PENDING') {
+      const captureId = (resource.id as string) || '';
+      const amountVal = (resource.amount as { value?: string })?.value || '0.00';
+      const reason = (resource.status_details as { reason?: string })?.reason || 'PENDING_REVIEW';
+      actionResult = 'held';
+      detail = `Capture ${captureId} for $${amountVal} held: ${reason}`;
+    } else if (eventType === 'PAYMENT.CAPTURE.COMPLETED') {
+      const captureId = (resource.id as string) || '';
+      actionResult = 'released';
+      detail = `Capture ${captureId} completed and funds released`;
+    } else if (eventType === 'CUSTOMER.DISPUTE.CREATED') {
+      const disputeId = (resource.dispute_id as string) || '';
+      actionResult = 'dispute_opened';
+      detail = `Dispute ${disputeId} opened; funds placed on hold`;
+    }
+
+    // Append to tamper-evident audit chain
+    const auditEntry = db.appendAuditEntry({
+      actor: 'PayPal Webhook Gateway',
+      action: eventType,
+      target: eventId,
+      result: actionResult,
+      detail: `${detail} | signature_verified=${verificationPassed}`
+    });
+
+    return reply.status(200).send({
+      status: 'SUCCESS',
+      event_id: eventId,
+      event_type: eventType,
+      signature_verified: verificationPassed,
+      audit_block_id: auditEntry.block_id,
+      audit_hash: auditEntry.hash
+    });
+  });
+
+  return fastify;
+}
+
+// Start server if executed directly
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  createServer().then(async (server) => {
+    try {
+      await server.listen({ port: PORT, host: HOST });
+      console.log(`\n======================================================`);
+      console.log(`🚀 Unhold API Server running on http://${HOST}:${PORT}`);
+      console.log(`📡 PayPal Webhook Endpoint: http://${HOST}:${PORT}/webhooks/paypal`);
+      console.log(`💚 Health Check: http://${HOST}:${PORT}/health`);
+      console.log(`======================================================\n`);
+    } catch (err) {
+      server.log.error(err);
+      process.exit(1);
+    }
+  });
+}
