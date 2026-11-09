@@ -35,9 +35,15 @@ const INJECTION_RULES: PatternRule[] = [
   // 1. Direct instruction overrides
   {
     category: 'DIRECT_OVERRIDE',
-    pattern: /ignore\s+(all\s+|any\s+|the\s+)?((previous|prior|above|earlier)\s+)?(instructions|prompts|directions|rules)/i,
+    pattern: /(override|bypass|ignore|cancel)\s+(all\s+|any\s+|the\s+)?((previous|prior|above|earlier|safety)\s+)?(instructions|prompts|directions|rules|guidelines)/i,
+    weight: 0.9,
+    description: 'Directive to override or bypass instructions'
+  },
+  {
+    category: 'DIRECT_OVERRIDE',
+    pattern: /(system|admin|developer)\s+(instruction|prompt|directive)s?[:\s]+/i,
     weight: 0.85,
-    description: 'Direct instruction override attempt ("ignore previous instructions")'
+    description: 'System instruction directive prefix'
   },
   {
     category: 'DIRECT_OVERRIDE',

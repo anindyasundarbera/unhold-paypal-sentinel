@@ -249,6 +249,22 @@ export function seedLedger(db: LedgerDB): {
     detail: 'ledger 5,235.24 = withheld (simulated), difference $0.00'
   });
 
+  // 5. Seed Initial Demo Dispute for A2A Negotiation
+  if (!db.getDispute('DISP-SEED-001')) {
+    db.insertDispute({
+      dispute_id: 'DISP-SEED-001',
+      order_id: 'ORD-789012',
+      capture_id: 'CAP-789012',
+      amount: 249.00,
+      currency: 'USD',
+      status: 'WAITING_FOR_SELLER_RESPONSE',
+      reason: 'ITEM_NOT_RECEIVED',
+      buyer_message: 'Package has not arrived. Please refund or confirm where it was left.',
+      respond_by: new Date(Date.now() + 864000000).toISOString(),
+      created_at: new Date().toISOString()
+    });
+  }
+
   return {
     holdsCount: data.holds.length,
     evidenceCount: data.evidence.length,

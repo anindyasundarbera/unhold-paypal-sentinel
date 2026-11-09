@@ -432,11 +432,15 @@ We placed a temporary hold on this payment while we verify delivery. Upload trac
       });
       const data = await res.json();
 
-      if (data.is_injection || data.risk_score > 0.4) {
+      const isInj = data.isInjected || data.is_injection || (data.riskScore && data.riskScore > 0.4) || (data.risk_score && data.risk_score > 0.4);
+      const score = data.riskScore !== undefined ? data.riskScore : (data.risk_score || 0);
+      const categories = (data.attackCategories && data.attackCategories.length > 0) ? data.attackCategories.join(', ') : (data.attack_category || 'PROMPT_INJECTION');
+
+      if (isInj) {
         resDiv.innerHTML = `
           <div style="padding:10px;background:rgba(248,81,73,0.1);border:1px solid #f85149;border-radius:6px;">
-            <strong style="color:#f85149">⛔ Injection Detected (Risk: ${(data.risk_score * 100).toFixed(0)}%)</strong>
-            <p style="font-size:12px;color:var(--text);margin-top:4px;">Threat Category: <code>${data.attack_category}</code></p>
+            <strong style="color:#f85149">⛔ Injection Detected (Risk: ${(score * 100).toFixed(0)}%)</strong>
+            <p style="font-size:12px;color:var(--text);margin-top:4px;">Threat Category: <code>${categories}</code></p>
             <p style="font-size:11px;color:var(--text-muted);margin-top:2px;">Circuit breaker tripped. Payout commands neutralized.</p>
           </div>
         `;
