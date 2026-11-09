@@ -1,4 +1,6 @@
 import { DatabaseSync } from 'node:sqlite';
+import { mkdirSync, existsSync } from 'node:fs';
+import { dirname } from 'node:path';
 import type {
   HoldRecord,
   CarrierManifestRecord,
@@ -13,6 +15,12 @@ export class LedgerDB {
   private db: DatabaseSync;
 
   constructor(dbPath: string = ':memory:') {
+    if (dbPath !== ':memory:') {
+      const dir = dirname(dbPath);
+      if (dir && !existsSync(dir)) {
+        mkdirSync(dir, { recursive: true });
+      }
+    }
     this.db = new DatabaseSync(dbPath);
     this.db.exec('PRAGMA foreign_keys = ON;');
     this.initTables();

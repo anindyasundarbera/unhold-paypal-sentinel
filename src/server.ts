@@ -3,7 +3,7 @@ import cors from '@fastify/cors';
 import fastifyStatic from '@fastify/static';
 import { readFileSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve, isAbsolute } from 'node:path';
 import { LedgerDB } from './db/ledger_db.js';
 import { seedLedger } from './seed/seeder.js';
 import { PayPalClient } from './paypal/client.js';
@@ -102,7 +102,12 @@ export async function createServer(customDb?: LedgerDB, customPayPal?: PayPalCli
     }
   );
 
-  const db = customDb || new LedgerDB(process.env.DATABASE_PATH || ':memory:');
+  const rawDbPath = process.env.DATABASE_PATH || ':memory:';
+  let dbPath = rawDbPath;
+  if (dbPath !== ':memory:' && !isAbsolute(dbPath)) {
+    dbPath = resolve(join(__dirname, '..'), rawDbPath);
+  }
+  const db = customDb || new LedgerDB(dbPath);
   // Seed the ledger if empty
   if (db.getAllHolds().length === 0) {
     seedLedger(db);
