@@ -104,12 +104,83 @@ export const SCHEMA_SQL = `
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
   );
+
+  CREATE TABLE IF NOT EXISTS agent_runs (
+    id TEXT PRIMARY KEY,
+    agent TEXT NOT NULL,
+    goal TEXT NOT NULL,
+    mode TEXT NOT NULL,
+    trigger TEXT NOT NULL,
+    status TEXT NOT NULL,
+    started_at TEXT NOT NULL,
+    finished_at TEXT,
+    summary TEXT,
+    plan TEXT,
+    error TEXT,
+    trace_id TEXT
+  );
+  CREATE INDEX IF NOT EXISTS agent_runs_started_idx ON agent_runs (started_at);
+
+  CREATE TABLE IF NOT EXISTS agent_steps (
+    run_id TEXT NOT NULL,
+    seq INTEGER NOT NULL,
+    agent TEXT NOT NULL,
+    stage TEXT NOT NULL,
+    tool TEXT,
+    ok INTEGER NOT NULL,
+    ms INTEGER,
+    at TEXT NOT NULL,
+    input TEXT,
+    output TEXT,
+    note TEXT,
+    PRIMARY KEY (run_id, seq)
+  );
+
+  CREATE TABLE IF NOT EXISTS approvals (
+    id TEXT PRIMARY KEY,
+    run_id TEXT NOT NULL,
+    status TEXT NOT NULL,
+    title TEXT NOT NULL,
+    payload TEXT NOT NULL,
+    channel TEXT,
+    requested_at TEXT NOT NULL,
+    decided_at TEXT,
+    decided_by TEXT
+  );
+
+  CREATE TABLE IF NOT EXISTS app_logs (
+    id TEXT PRIMARY KEY,
+    ts TEXT NOT NULL,
+    level TEXT NOT NULL,
+    msg TEXT NOT NULL,
+    request_id TEXT,
+    run_id TEXT,
+    ctx TEXT
+  );
+  CREATE INDEX IF NOT EXISTS app_logs_ts_idx ON app_logs (ts);
 `;
 
 /** Real Postgres only (pg-mem has no RLS): keep the tables off the public Data API. */
-const RLS_SQL = ['holds', 'manifests', 'disputes', 'audit_entries', 'evidence', 'metadata']
+const RLS_SQL = ['holds', 'manifests', 'disputes', 'audit_entries', 'evidence', 'metadata', 'agent_runs', 'agent_steps', 'approvals', 'app_logs']
   .map((t) => `ALTER TABLE ${t} ENABLE ROW LEVEL SECURITY;`)
   .join('\n');
+
+export interface AgentRunRow {
+  id: string; agent: string; goal: string; mode: string; trigger: string; status: string;
+  started_at: string; finished_at: string | null; summary: string | null; plan: string | null;
+  error: string | null; trace_id: string | null;
+}
+export interface AgentStepRow {
+  run_id: string; seq: number; agent: string; stage: string; tool: string | null; ok: boolean;
+  ms: number | null; at: string; input: string | null; output: string | null; note: string | null;
+}
+export interface ApprovalRow {
+  id: string; run_id: string; status: string; title: string; payload: string; channel: string | null;
+  requested_at: string; decided_at: string | null; decided_by: string | null;
+}
+export interface AppLogRow {
+  id: string; ts: string; level: string; msg: string; request_id: string | null; run_id: string | null; ctx: string | null;
+}
 
 type Row = Record<string, unknown>;
 
@@ -488,6 +559,120 @@ export class LedgerDB {
 
   async verifyLedgerAuditChain(): Promise<{ valid: boolean; brokenIndex?: number; error?: string }> {
     return verifyAuditChain(await this.getAuditChain());
+  }
+
+  // --- Agent runs, steps, approvals ---
+
+  async createRun(r: Pick<AgentRunRow, 'id' | 'agent' | 'goal' | 'mode' | 'trigger'> & { trace_id?: string | null }): Promise<void> {
+    await this.pool.query(
+      `INSERT INTO agent_runs (id, agent, goal, mode, trigger, status, started_at, trace_id) VALUES ($1,$2,$3,$4,$5,'running',$6,$7)`,
+      [r.id, r.agent, r.goal, r.mode, r.trigger, new Date().toISOString(), r.trace_id ?? null]
+    );
+  }
+
+  async updateRun(id: string, patch: Partial<Pick<AgentRunRow, 'status' | 'summary' | 'plan' | 'error' | 'finished_at' | 'trace_id'>>): Promise<void> {
+    const sets: string[] = [];
+    const vals: unknown[] = [];
+    for (const [k, v] of Object.entries(patch)) {
+      vals.push(v ?? null);
+      sets.push(`${k} = $${vals.length}::text`);
+    }
+    if (!sets.length) return;
+    vals.push(id);
+    await this.pool.query(`UPDATE agent_runs SET ${sets.join(', ')} WHERE id = $${vals.length}`, vals);
+  }
+
+  async getRun(id: string): Promise<AgentRunRow | null> {
+    const rows = await this.rows('SELECT * FROM agent_runs WHERE id = $1', [id]);
+    return (rows[0] as unknown as AgentRunRow) ?? null;
+  }
+
+  async listRuns(limit = 30): Promise<AgentRunRow[]> {
+    return (await this.rows('SELECT * FROM agent_runs ORDER BY started_at DESC LIMIT $1', [limit])) as unknown as AgentRunRow[];
+  }
+
+  async addStep(s: Omit<AgentStepRow, 'seq'>): Promise<number> {
+    const r = await this.rows('SELECT COALESCE(MAX(seq), 0) + 1 AS n FROM agent_steps WHERE run_id = $1', [s.run_id]);
+    const seq = Number(r[0].n);
+    await this.pool.query(
+      `INSERT INTO agent_steps (run_id, seq, agent, stage, tool, ok, ms, at, input, output, note) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+      [s.run_id, seq, s.agent, s.stage, s.tool, s.ok ? 1 : 0, s.ms, s.at, s.input, s.output, s.note]
+    );
+    return seq;
+  }
+
+  async getSteps(runId: string): Promise<AgentStepRow[]> {
+    const rows = await this.rows('SELECT * FROM agent_steps WHERE run_id = $1 ORDER BY seq', [runId]);
+    return rows.map((r) => ({ ...(r as unknown as AgentStepRow), ok: Boolean(r.ok), seq: Number(r.seq), ms: r.ms == null ? null : Number(r.ms) }));
+  }
+
+  async createApproval(a: Pick<ApprovalRow, 'id' | 'run_id' | 'title' | 'payload' | 'channel'>): Promise<void> {
+    await this.pool.query(
+      `INSERT INTO approvals (id, run_id, status, title, payload, channel, requested_at) VALUES ($1,$2,'pending',$3,$4,$5,$6)`,
+      [a.id, a.run_id, a.title, a.payload, a.channel, new Date().toISOString()]
+    );
+  }
+
+  async getApproval(id: string): Promise<ApprovalRow | null> {
+    const rows = await this.rows('SELECT * FROM approvals WHERE id = $1', [id]);
+    return (rows[0] as unknown as ApprovalRow) ?? null;
+  }
+
+  async listApprovals(limit = 30): Promise<ApprovalRow[]> {
+    return (await this.rows('SELECT * FROM approvals ORDER BY requested_at DESC LIMIT $1', [limit])) as unknown as ApprovalRow[];
+  }
+
+  /** Only a pending approval can be decided, and only once (returns false if it already was). */
+  async decideApproval(id: string, status: 'approved' | 'rejected', by: string): Promise<boolean> {
+    return this.changed(
+      `UPDATE approvals SET status = $1, decided_at = $2, decided_by = $3 WHERE id = $4 AND status = 'pending'`,
+      [status, new Date().toISOString(), by, id]
+    );
+  }
+
+  async setApprovalChannel(id: string, channel: string): Promise<void> {
+    await this.pool.query('UPDATE approvals SET channel = $1 WHERE id = $2', [channel, id]);
+  }
+
+  // --- Production logs ---
+
+  async writeLogs(rows: AppLogRow[]): Promise<void> {
+    for (const r of rows) {
+      await this.pool.query(
+        `INSERT INTO app_logs (id, ts, level, msg, request_id, run_id, ctx) VALUES ($1,$2,$3,$4,$5,$6,$7) ON CONFLICT (id) DO NOTHING`,
+        [r.id, r.ts, r.level, r.msg, r.request_id, r.run_id, r.ctx]
+      );
+    }
+  }
+
+  async listLogs(opts: { level?: string; runId?: string; q?: string; limit?: number } = {}): Promise<AppLogRow[]> {
+    const where: string[] = [];
+    const vals: unknown[] = [];
+    const rank: Record<string, string[]> = { error: ['error', 'fatal'], warn: ['warn', 'error', 'fatal'], info: ['info', 'warn', 'error', 'fatal'] };
+    if (opts.level && rank[opts.level]) {
+      const placeholders = rank[opts.level].map((l) => { vals.push(l); return `$${vals.length}`; });
+      where.push(`level IN (${placeholders.join(',')})`);
+    }
+    if (opts.runId) { vals.push(opts.runId); where.push(`run_id = $${vals.length}`); }
+    if (opts.q) { vals.push(`%${opts.q.toLowerCase()}%`); where.push(`LOWER(msg) LIKE $${vals.length}`); }
+    vals.push(Math.min(opts.limit ?? 200, 500));
+    return (await this.rows(
+      `SELECT * FROM app_logs ${where.length ? 'WHERE ' + where.join(' AND ') : ''} ORDER BY ts DESC LIMIT $${vals.length}`,
+      vals
+    )) as unknown as AppLogRow[];
+  }
+
+  /** Housekeeping: drop log rows older than `days`. */
+  async pruneLogs(days: number): Promise<number> {
+    const cutoff = new Date(Date.now() - days * 86400000).toISOString();
+    const r = await this.pool.query('DELETE FROM app_logs WHERE ts < $1', [cutoff]);
+    return r.rowCount ?? 0;
+  }
+
+  async ping(): Promise<number> {
+    const t = Date.now();
+    await this.pool.query('SELECT 1');
+    return Date.now() - t;
   }
 
   async counts(): Promise<Record<string, number>> {

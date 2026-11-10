@@ -61,6 +61,7 @@
   </header>
   <nav id="tabs">
     <button data-tab="cockpit" class="active">Cockpit</button>
+    <button data-tab="agents">Agent team</button>
     <button data-tab="holds">Holds</button>
     <button data-tab="matcher">Tracking matcher</button>
     <button data-tab="timeline">Release timeline</button>
@@ -68,6 +69,7 @@
     <button data-tab="guard">Payment guard</button>
     <button data-tab="disputes">Disputes</button>
     <button data-tab="audit">Audit chain</button>
+    <button data-tab="logs">Logs</button>
   </nav>
   <main>
     <section class="view active" id="view-cockpit">
@@ -85,6 +87,25 @@
           <div class="note" id="whyNote"></div>
         </div>
       </div>
+    </section>
+
+    <section class="view" id="view-agents">
+      <div class="bar">
+        <button class="btn primary" id="btnRunAgent">Run the Unhold agent</button>
+        <label>Mode
+          <select id="agentMode" aria-label="Agent mode">
+            <option value="live">Live: only real PayPal orders</option>
+            <option value="simulated">Simulated: seeded holds, no PayPal call</option>
+          </select>
+        </label>
+        <button class="btn" id="btnMorningBrief">Morning brief</button>
+        <span class="note">The agent proposes; nothing is uploaded until you approve. Approval requests also go out through Zapier.</span>
+      </div>
+      <div class="status" id="agentStatus"></div>
+      <h2>Waiting for you</h2>
+      <div id="gridApprovals" class="grid" style="height:190px"></div>
+      <h2>Agent runs (expand a row for every step the agents took)</h2>
+      <div id="gridRuns" class="grid h-grow"></div>
     </section>
 
     <section class="view" id="view-holds">
@@ -161,6 +182,17 @@
         <span class="status" id="auditStatus"></span>
       </div>
       <div id="gridAudit" class="grid h-grow"></div>
+    </section>
+    <section class="view" id="view-logs">
+      <div class="bar">
+        <label>Level
+          <select id="logLevel" aria-label="Log level"><option value="info">info and above</option><option value="warn">warnings and errors</option><option value="error">errors only</option></select>
+        </label>
+        <input type="text" id="logSearch" class="grow" placeholder="Filter log messages, e.g. agent.step, webhook, http.error" aria-label="Filter logs">
+        <button class="btn" id="btnLogsRefresh">Refresh</button>
+        <span class="note" id="logsNote">Redacted at write time. Also streamed as JSON to Render and Astropods.</span>
+      </div>
+      <div id="gridLogs" class="grid h-grow"></div>
     </section>
   </main>
 

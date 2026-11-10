@@ -14,6 +14,10 @@ export interface BatchUploadOptions {
   maxBatch?: number;
   dryRun?: boolean;
   orderIds?: string[];
+  /** Explicit simulation for seeded holds that have no real PayPal order; always labelled in the audit chain. */
+  simulate?: boolean;
+  /** Skip the Zapier summary event (the agent sends its own). */
+  quiet?: boolean;
 }
 
 export interface UploadItemResult {
@@ -143,7 +147,7 @@ export async function executeBatchTrackingUpload(
 
     // Simulation is explicit and labelled: tests, or UNHOLD_SIMULATE_UPLOADS=true for seeded
     // holds that have no real PayPal order behind them. Otherwise a failed PayPal call stays failed.
-    const simulate = process.env.NODE_ENV === 'test' || process.env.UNHOLD_SIMULATE_UPLOADS === 'true';
+    const simulate = options.simulate === true || process.env.NODE_ENV === 'test' || process.env.UNHOLD_SIMULATE_UPLOADS === 'true';
 
     if (!simulate) {
       try {
@@ -244,7 +248,7 @@ export async function executeBatchTrackingUpload(
   const summaryAfter = await ledger.getSummary();
   const avgDaysSaved = totalUploaded > 0 ? Number((totalDaysSavedSum / totalUploaded).toFixed(1)) : 0;
 
-  if (totalUploaded > 0 && process.env.ZAPIER_WEBHOOK_URL) {
+  if (totalUploaded > 0 && process.env.ZAPIER_WEBHOOK_URL && !options.quiet) {
     try {
       await dispatchZapierEvent({
         event: 'tracking.batch_uploaded',

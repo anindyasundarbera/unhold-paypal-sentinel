@@ -36,6 +36,14 @@ import { channel3Configured, lookupProduct } from './engine/product_lookup.js';
 import { checkCarrierStatus, kernelConfigured } from './engine/carrier_browser.js';
 import type { CarrierManifestRecord, DisputeRecord } from './types/ledger.js';
 import type { WebhookVerificationRequest } from './types/paypal.js';
+import { randomUUID } from 'node:crypto';
+import { logger } from './obs/log_store.js';
+import { metrics } from './obs/metrics.js';
+import { PINO_REDACT_PATHS } from './obs/redact.js';
+import { startTracing, stopTracing, tracingEnabled } from './obs/tracing.js';
+import { startRun, decideApproval, recoverStaleRuns, RunConflictError, type Goal, type Mode } from './agents/supervisor.js';
+import { verifyApprovalToken } from './agents/approvals.js';
+import { zapierMcpConfigured } from './agents/zapier_mcp.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -47,7 +55,8 @@ const candidateEnvPaths = [
   join(__dirname, '../../.env'),
   join(__dirname, '../../../.env')
 ];
-for (const p of candidateEnvPaths) {
+// Tests are hermetic: never pick up real credentials (LLM, Zapier, Elastic, Kernel...) from a developer's .env.
+for (const p of process.env.NODE_ENV === 'test' ? [] : candidateEnvPaths) {
   if (existsSync(p)) {
     const envContent = readFileSync(p, 'utf8');
     for (const line of envContent.split('\n')) {
@@ -67,8 +76,58 @@ const PORT = Number(process.env.PORT || 10000);
 const HOST = process.env.HOST || '0.0.0.0';
 
 export async function createServer(customDb?: LedgerDB, customPayPal?: PayPalClient) {
+  if (!customDb) await startTracing();
+
   const fastify = Fastify({
-    logger: process.env.NODE_ENV !== 'test'
+    // Production logging: structured JSON on stdout (Render / Astropods log streams), secrets redacted,
+    // one request id per call (honours an incoming x-request-id), URLs logged without query strings.
+    logger:
+      process.env.NODE_ENV === 'test'
+        ? false
+        : {
+            level: process.env.LOG_LEVEL || 'info',
+            redact: { paths: PINO_REDACT_PATHS, censor: '[redacted]' },
+            base: {
+              service: process.env.ASTRO_AGENT_NAME || 'unhold-api',
+              env: process.env.NODE_ENV || 'development',
+              version: process.env.ASTRO_AGENT_BUILD || process.env.RENDER_GIT_COMMIT?.slice(0, 7) || 'dev'
+            },
+            timestamp: () => `,"time":"${new Date().toISOString()}"`,
+            serializers: {
+              req(req: { method: string; url: string; host?: string; ip?: string }) {
+                return { method: req.method, url: String(req.url).split('?')[0], host: req.host, remoteAddress: req.ip };
+              }
+            }
+          },
+    genReqId: (req) => String(req.headers['x-request-id'] || randomUUID()),
+    requestIdLogLabel: 'request_id',
+    trustProxy: true
+  });
+
+  // --- Observability hooks: request id header, metrics, persisted request/error logs ---
+  fastify.addHook('onRequest', async (req, reply) => {
+    reply.header('x-request-id', req.id);
+  });
+  const QUIET_ROUTES = new Set(['/health', '/healthz', '/readyz', '/metrics', '/api/logs']);
+  fastify.addHook('onResponse', async (req, reply) => {
+    const route = req.routeOptions?.url || 'unmatched';
+    const status = reply.statusCode;
+    metrics.inc('unhold_http_requests_total', { method: req.method, route, status });
+    metrics.observe('unhold_http_request_ms', { route }, reply.elapsedTime);
+    if (QUIET_ROUTES.has(route)) return;
+    const persist = status >= 400 || (req.method !== 'GET' && route.startsWith('/api'));
+    if (persist) {
+      const level = status >= 500 ? 'error' : status >= 400 ? 'warn' : 'info';
+      logger[level]('http.request', { request_id: req.id, method: req.method, route, status, ms: Math.round(reply.elapsedTime), persist: true });
+    }
+  });
+  fastify.setErrorHandler((error, req, reply) => {
+    const err = error as Error & { statusCode?: number };
+    const status = err.statusCode && err.statusCode >= 400 ? err.statusCode : 500;
+    logger[status >= 500 ? 'error' : 'warn']('http.error', {
+      request_id: req.id, route: req.routeOptions?.url, status, error: err.message, stack: status >= 500 ? err.stack : undefined, persist: true
+    });
+    reply.status(status).send({ error: status >= 500 ? 'Internal error' : err.message, request_id: req.id });
   });
 
   await fastify.register(cors, {
@@ -117,6 +176,9 @@ export async function createServer(customDb?: LedgerDB, customPayPal?: PayPalCli
     }
   );
 
+  // HTML forms (the approval confirmation page) post urlencoded bodies
+  fastify.addContentTypeParser('application/x-www-form-urlencoded', { parseAs: 'string' }, (_req, body, done) => done(null, body));
+
   // Supabase Postgres is the only ledger store (DATABASE_URL). Tests inject an in-memory Postgres.
   const db: LedgerDB = customDb ?? (await LedgerDB.connect());
   if ((await db.getAllHolds()).length === 0) {
@@ -136,6 +198,120 @@ export async function createServer(customDb?: LedgerDB, customPayPal?: PayPalCli
       webhookId
     });
 
+  // --- Production logging sink + start-up housekeeping ---
+  logger.attach(fastify.log as never, db);
+  logger.start();
+  if (!customDb) {
+    recoverStaleRuns(db).catch((e) => logger.warn('agent.recover_failed', { error: e.message }));
+    db.pruneLogs(Number(process.env.LOG_RETENTION_DAYS || 14)).catch(() => undefined);
+  }
+  logger.info('server.configured', { ledger: db.backend, tracing: tracingEnabled, llm: llmConfigured(), persist: !customDb });
+  fastify.addHook('onClose', async () => {
+    await logger.stop();
+    await stopTracing();
+  });
+
+  const agentCtx = { db, paypal, baseUrl: process.env.PUBLIC_BASE_URL || `http://127.0.0.1:${PORT}` };
+  const ingestSecretOk = (req: { headers: Record<string, unknown> }) => {
+    const secret = process.env.INGEST_SHARED_SECRET;
+    const sent = Buffer.from(String(req.headers['x-unhold-secret'] || ''));
+    return Boolean(secret) && sent.length === Buffer.byteLength(secret as string) && timingSafeEqual(sent, Buffer.from(secret as string));
+  };
+
+  // --- Liveness / readiness / metrics ---
+  fastify.get('/healthz', async () => ({ status: 'ok' }));
+  fastify.get('/readyz', async (_req, reply) => {
+    try {
+      const dbMs = await db.ping();
+      return {
+        status: 'ready', ledger: db.backend, db_ms: dbMs, tracing: tracingEnabled,
+        dependencies: {
+          llm: llmConfigured(), elastic: elastic.elasticConfigured(), kernel: kernelConfigured(), channel3: channel3Configured(),
+          zapier_hook: Boolean(process.env.ZAPIER_WEBHOOK_URL), zapier_mcp: zapierMcpConfigured()
+        },
+        log_queue_dropped: logger.dropped
+      };
+    } catch (err) {
+      logger.error('readyz.failed', { error: (err as Error).message });
+      return reply.status(503).send({ status: 'not_ready', error: 'ledger unreachable' });
+    }
+  });
+  fastify.get('/metrics', async (_req, reply) => reply.type('text/plain; version=0.0.4').send(metrics.render()));
+
+  // --- Persisted production logs (redacted at write time) ---
+  fastify.get('/api/logs', async (req) => {
+    const q = req.query as { level?: string; run_id?: string; q?: string; limit?: string };
+    const rows = await db.listLogs({ level: q.level, runId: q.run_id, q: q.q, limit: Number(q.limit) || 200 });
+    return { logs: rows.map((r) => ({ ...r, ctx: r.ctx ? JSON.parse(r.ctx) : null })) };
+  });
+
+  // --- Agent team: runs, steps, approvals ---
+  fastify.post('/api/agent/runs', async (req, reply) => {
+    const body = (req.body || {}) as { goal?: string; mode?: string };
+    const goal: Goal = body.goal === 'morning_brief' ? 'morning_brief' : 'unhold';
+    const mode: Mode = body.mode === 'simulated' ? 'simulated' : 'live';
+    try {
+      const { runId } = await startRun(agentCtx, { goal, mode, trigger: ingestSecretOk(req) ? 'zapier' : 'cockpit' });
+      return reply.status(202).send({ run_id: runId });
+    } catch (err) {
+      if (err instanceof RunConflictError) return reply.status(409).send({ error: err.message });
+      throw err;
+    }
+  });
+  fastify.get('/api/agent/runs', async () => ({ runs: await db.listRuns(40) }));
+  fastify.get('/api/agent/runs/:id', async (req, reply) => {
+    const id = (req.params as { id: string }).id;
+    const run = await db.getRun(id);
+    if (!run) return reply.status(404).send({ error: 'Run not found.' });
+    const parse = (s: string | null) => { try { return s ? JSON.parse(s) : null; } catch { return s; } };
+    return {
+      run: { ...run, plan: parse(run.plan) },
+      steps: (await db.getSteps(id)).map((s) => ({ ...s, input: parse(s.input), output: parse(s.output) })),
+      approvals: (await db.listApprovals(50)).filter((a) => a.run_id === id).map((a) => ({ ...a, payload: parse(a.payload) }))
+    };
+  });
+  fastify.get('/api/agent/approvals', async () => ({
+    approvals: (await db.listApprovals(40)).map((a) => {
+      const p = (() => { try { return JSON.parse(a.payload); } catch { return {}; } })();
+      return { ...a, payload: undefined, orders: p.plan?.items?.length ?? 0, total_usd: p.plan?.total_usd ?? 0, mode: p.plan?.mode, summary: p.summary };
+    })
+  }));
+  fastify.post('/api/agent/approvals/:id/decision', async (req, reply) => {
+    const body = (req.body || {}) as { decision?: string; by?: string };
+    if (body.decision !== 'approved' && body.decision !== 'rejected') return reply.status(400).send({ error: 'decision must be approved or rejected' });
+    const r = await decideApproval(agentCtx, (req.params as { id: string }).id, body.decision, String(body.by || 'cockpit').slice(0, 60));
+    return reply.status(r.ok ? 200 : 409).send(r);
+  });
+
+  // One-click links in Slack/email: GET shows a confirmation page, POST decides (so link-preview bots cannot approve).
+  const page = (title: string, body: string) =>
+    `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${title}</title>
+<body style="font:16px system-ui;max-width:520px;margin:48px auto;padding:0 16px;color:#111"><h1 style="font-size:22px">${title}</h1>${body}</body></html>`;
+  const esc = (v: string) => v.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c] as string));
+  fastify.get('/approve/:id', async (req, reply) => {
+    const id = (req.params as { id: string }).id;
+    const q = req.query as { d?: string; t?: string };
+    const d = q.d === 'reject' ? 'reject' : 'approve';
+    if (!verifyApprovalToken(id, d, q.t || '')) return reply.status(403).type('text/html').send(page('Link not valid', '<p>This approval link is invalid or has been altered.</p>'));
+    const a = await db.getApproval(id);
+    if (!a) return reply.status(404).type('text/html').send(page('Not found', '<p>That approval no longer exists.</p>'));
+    if (a.status !== 'pending') return reply.type('text/html').send(page(`Already ${esc(a.status)}`, `<p>${esc(a.title)}</p><p>This request was already ${esc(a.status)}.</p>`));
+    const p = (() => { try { return JSON.parse(a.payload); } catch { return {}; } })();
+    return reply.type('text/html').send(page(`${d === 'approve' ? 'Approve' : 'Reject'}: ${esc(a.title)}`,
+      `<p>${esc(String(p.summary || ''))}</p><p><b>${p.plan?.items?.length ?? 0}</b> parcels 路 <b>$${Number(p.plan?.total_usd ?? 0).toFixed(2)}</b> 路 mode ${esc(String(p.plan?.mode ?? ''))}</p>
+<form method="post" action="/approve/${esc(id)}"><input type="hidden" name="d" value="${d}"><input type="hidden" name="t" value="${esc(q.t || '')}">
+<button style="font-size:16px;padding:10px 18px;border-radius:8px;border:0;background:${d === 'approve' ? '#1a7f37' : '#cf222e'};color:#fff;cursor:pointer">Confirm ${d}</button></form>`));
+  });
+  fastify.post('/approve/:id', async (req, reply) => {
+    const id = (req.params as { id: string }).id;
+    const form = new URLSearchParams(typeof req.body === 'string' ? req.body : '');
+    const d = form.get('d') === 'reject' ? 'reject' : 'approve';
+    if (!verifyApprovalToken(id, d, form.get('t') || '')) return reply.status(403).type('text/html').send(page('Link not valid', '<p>This approval link is invalid or has been altered.</p>'));
+    const r = await decideApproval(agentCtx, id, d === 'approve' ? 'approved' : 'rejected', 'slack-link');
+    return reply.type('text/html').send(page(r.ok ? (d === 'approve' ? 'Approved' : 'Rejected') : 'Nothing changed',
+      r.ok ? `<p>Done. The agent ${d === 'approve' ? 'is uploading the tracking now' : 'will not upload anything'}. You can close this tab.</p>` : `<p>${esc(r.reason || 'Could not apply that decision.')}</p>`));
+  });
+
   // --- Health Check for Render ---
   // --- UI config (AG Grid Enterprise licence + feature flags) ---
   // An AG Grid licence key is a front-end key by design; it is served here so it is not committed.
@@ -147,7 +323,9 @@ export async function createServer(customDb?: LedgerDB, customPayPal?: PayPalCli
     simulateUploads: process.env.UNHOLD_SIMULATE_UPLOADS === 'true',
     integrations: {
       zapier: Boolean(process.env.ZAPIER_WEBHOOK_URL),
+      zapierMcp: zapierMcpConfigured(),
       astropods: Boolean(process.env.ASTROPODS_API_KEY),
+      tracing: tracingEnabled,
       elastic: Boolean(process.env.ELASTIC_URL && process.env.ELASTIC_API_KEY),
       kernel: Boolean(process.env.KERNEL_API_KEY),
       channel3: Boolean(process.env.CHANNEL3_API_KEY),
@@ -498,6 +676,14 @@ ${hold ? `<p>${esc(hold.carrier || '')} 路 shipped ${esc((hold.shipped_at || '鈥
       verificationPassed = process.env.NODE_ENV !== 'production';
     }
 
+    logger.info('webhook.received', { request_id: req.id, event_type: eventType, event_id: eventId, signature_verified: verificationPassed, persist: true });
+    metrics.inc('unhold_webhooks_total', { event_type: eventType, verified: String(verificationPassed) });
+    // A live account must never act on an event PayPal did not sign. Sandbox simulator events cannot be verified, so they are allowed there.
+    if (!verificationPassed && process.env.PAYPAL_ENVIRONMENT === 'live') {
+      logger.warn('webhook.signature_rejected', { request_id: req.id, event_type: eventType, event_id: eventId, persist: true });
+      return reply.status(401).send({ error: 'invalid webhook signature' });
+    }
+
     // Process specific PayPal events
     let actionResult = 'acknowledged';
     let detail = `Ingested event ${eventType} (${eventId})`;
@@ -573,17 +759,38 @@ ${hold ? `<p>${esc(hold.carrier || '')} 路 shipped ${esc((hold.shipped_at || '鈥
 
 // Start server if executed directly
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  createServer().then(async (server) => {
-    try {
-      await server.listen({ port: PORT, host: HOST });
-      console.log(`\n======================================================`);
-      console.log(`馃殌 Unhold API Server running on http://${HOST}:${PORT}`);
-      console.log(`馃摗 PayPal Webhook Endpoint: http://${HOST}:${PORT}/webhooks/paypal`);
-      console.log(`馃挌 Health Check: http://${HOST}:${PORT}/health`);
-      console.log(`======================================================\n`);
-    } catch (err) {
-      server.log.error(err);
+  createServer()
+    .then(async (server) => {
+      try {
+        await server.listen({ port: PORT, host: HOST });
+        server.log.info({ port: PORT, host: HOST }, 'unhold-api listening');
+
+        // Graceful shutdown: stop accepting traffic, flush logs and traces, close the database pool.
+        let closing = false;
+        const shutdown = async (signal: string) => {
+          if (closing) return;
+          closing = true;
+          server.log.info({ signal }, 'shutting down');
+          const force = setTimeout(() => process.exit(1), 15000);
+          force.unref();
+          await server.close().catch(() => undefined);
+          process.exit(0);
+        };
+        process.on('SIGTERM', () => void shutdown('SIGTERM'));
+        process.on('SIGINT', () => void shutdown('SIGINT'));
+        process.on('unhandledRejection', (reason) => logger.error('process.unhandled_rejection', { error: String(reason) }));
+        process.on('uncaughtException', (err) => {
+          logger.error('process.uncaught_exception', { error: err.message, stack: err.stack });
+          void logger.flush().finally(() => process.exit(1));
+        });
+      } catch (err) {
+        server.log.error(err);
+        process.exit(1);
+      }
+    })
+    .catch((err) => {
+      // e.g. DATABASE_URL missing or the ledger unreachable: say why and exit non-zero so the platform restarts/alerts
+      console.error(JSON.stringify({ level: 'fatal', event: 'startup.failed', error: (err as Error).message }));
       process.exit(1);
-    }
-  });
+    });
 }

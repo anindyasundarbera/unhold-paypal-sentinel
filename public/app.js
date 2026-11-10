@@ -65,6 +65,8 @@
   // ---------- Tabs (grids are created lazily so they size correctly) ----------
   const loaders = {
     cockpit: loadCockpit,
+    agents: loadAgents,
+    logs: loadLogs,
     holds: loadHolds,
     matcher: loadMatcher,
     timeline: loadTimeline,
@@ -630,6 +632,145 @@ Seller Protection: Eligible`;
       setStatus('auditStatus', e.message, 'bad');
     }
   });
+
+  // ================= Agent team =================
+  const RUN_COLORS = { completed: 'good', running: 'info', awaiting_approval: 'warn', failed: 'bad', rejected: 'mute', pending: 'warn', approved: 'good' };
+  const statusChip = (s) => chip(String(s).replace('_', ' '), RUN_COLORS[s] || 'mute');
+  const AGENT_LABEL = { supervisor: 'Supervisor', cash_flow: 'Cash-flow', payment_guard: 'Payment Guard', buyer_assurance: 'Buyer Assurance' };
+  let agentPoll = null;
+
+  function makeAgentGrids() {
+    makeGrid('approvals', $('gridApprovals'), {
+      columnDefs: [
+        { field: 'status', headerName: 'Status', width: 120, cellRenderer: (p) => statusChip(p.value) },
+        { field: 'title', headerName: 'Request', flex: 1, minWidth: 240 },
+        { field: 'orders', headerName: 'Parcels', width: 100 },
+        { field: 'total_usd', headerName: 'Cash affected', width: 140, valueFormatter: (p) => money(p.value) },
+        { field: 'channel', headerName: 'Sent via', width: 220 },
+        { field: 'summary', headerName: 'Agent summary', flex: 2, minWidth: 260, wrapText: true, autoHeight: true },
+        {
+          headerName: 'Decision', width: 200, pinned: 'right',
+          cellRenderer: (p) => {
+            const a = p.data;
+            const box = document.createElement('span');
+            if (a.status !== 'pending') { box.className = 'note'; box.textContent = `${a.status}${a.decided_by ? ' by ' + a.decided_by : ''}`; return box; }
+            for (const [label, decision, cls] of [['Approve', 'approved', 'btn primary'], ['Reject', 'rejected', 'btn']]) {
+              const b = document.createElement('button');
+              b.className = cls; b.style.cssText = 'padding:2px 10px;margin-right:6px'; b.textContent = label;
+              b.addEventListener('click', async () => {
+                b.disabled = true;
+                try {
+                  const r = await post(`/api/agent/approvals/${encodeURIComponent(a.id)}/decision`, { decision, by: 'cockpit' });
+                  setStatus('agentStatus', r.ok ? `${label}d. The agent is ${decision === 'approved' ? 'uploading now' : 'standing down'}.` : r.reason, r.ok ? 'good' : 'bad');
+                } catch (e) { setStatus('agentStatus', e.message, 'bad'); }
+                await refreshAgents();
+              });
+              box.appendChild(b);
+            }
+            return box;
+          }
+        }
+      ],
+      getRowId: (p) => p.data.id, rowData: [], overlayNoRowsTemplate: 'Nothing is waiting for approval'
+    });
+
+    makeGrid('runs', $('gridRuns'), {
+      columnDefs: [
+        { field: 'started_at', headerName: 'Started', width: 170, cellRenderer: 'agGroupCellRenderer', valueFormatter: (p) => new Date(p.value).toLocaleString(), sort: 'desc' },
+        { field: 'goal', headerName: 'Goal', width: 140, valueFormatter: (p) => ({ unhold: 'Unhold', morning_brief: 'Morning brief' }[p.value] || p.value) },
+        { field: 'mode', headerName: 'Mode', width: 110 },
+        { field: 'trigger', headerName: 'Trigger', width: 110 },
+        { field: 'status', headerName: 'Status', width: 170, cellRenderer: (p) => statusChip(p.value) },
+        { field: 'summary', headerName: 'Outcome', flex: 1, minWidth: 320, wrapText: true, autoHeight: true },
+        { field: 'trace_id', headerName: 'Trace', width: 130, valueFormatter: (p) => (p.value ? p.value.slice(0, 12) + '…' : '—'), tooltipField: 'trace_id' }
+      ],
+      getRowId: (p) => p.data.id, rowData: [], masterDetail: true, detailRowAutoHeight: true, tooltipShowDelay: 300,
+      overlayNoRowsTemplate: 'No agent runs yet. Press “Run the Unhold agent”.',
+      detailCellRendererParams: {
+        detailGridOptions: {
+          theme,
+          columnDefs: [
+            { field: 'seq', headerName: '#', width: 60 },
+            { field: 'agent', headerName: 'Agent', width: 150, valueFormatter: (p) => AGENT_LABEL[p.value] || p.value },
+            { field: 'stage', headerName: 'Stage', width: 100, cellRenderer: (p) => chip(p.value, { perceive: 'info', reason: 'warn', plan: 'info', ask: 'warn', act: 'good', verify: 'good', learn: 'mute' }[p.value] || 'mute') },
+            { field: 'tool', headerName: 'Tool', width: 210 },
+            { field: 'ok', headerName: 'OK', width: 70, cellRenderer: (p) => (p.value ? chip('ok', 'good') : chip('failed', 'bad')) },
+            { field: 'ms', headerName: 'ms', width: 80 },
+            { field: 'note', headerName: 'What happened', flex: 1, minWidth: 280, wrapText: true, autoHeight: true, tooltipValueGetter: (p) => (p.data.output ? JSON.stringify(p.data.output).slice(0, 600) : '') }
+          ],
+          domLayout: 'autoHeight', tooltipShowDelay: 300
+        },
+        getDetailRowData: async (p) => {
+          try { p.successCallback((await api(`/api/agent/runs/${encodeURIComponent(p.data.id)}`)).steps); } catch { p.successCallback([]); }
+        }
+      }
+    });
+  }
+
+  async function refreshAgents() {
+    const [runs, approvals] = await Promise.all([api('/api/agent/runs'), api('/api/agent/approvals')]);
+    grids.runs.setGridOption('rowData', runs.runs);
+    grids.approvals.setGridOption('rowData', approvals.approvals);
+    return runs.runs;
+  }
+
+  async function loadAgents() {
+    makeAgentGrids();
+    await refreshAgents();
+    if (!agentPoll) {
+      agentPoll = setInterval(() => {
+        if ($('view-agents').classList.contains('active')) refreshAgents().catch(() => undefined);
+      }, 3000);
+    }
+  }
+
+  async function startAgent(goal) {
+    const mode = $('agentMode').value;
+    $('btnRunAgent').disabled = $('btnMorningBrief').disabled = true;
+    setStatus('agentStatus', goal === 'unhold' ? 'The agent team is working…' : 'Writing the morning brief…');
+    try {
+      const r = await post('/api/agent/runs', { goal, mode });
+      await refreshAgents();
+      setStatus('agentStatus', `Run ${r.run_id.slice(0, 8)} started. Expand it to watch each step.`, 'good');
+      grids.runs.forEachNode((n) => n.data.id === r.run_id && n.setExpanded(true));
+    } catch (e) {
+      setStatus('agentStatus', e.message, 'bad');
+    } finally {
+      $('btnRunAgent').disabled = $('btnMorningBrief').disabled = false;
+    }
+  }
+  $('btnRunAgent').addEventListener('click', () => startAgent('unhold'));
+  $('btnMorningBrief').addEventListener('click', () => startAgent('morning_brief'));
+
+  // ================= Logs =================
+  const LEVEL_COLOR = { debug: 'mute', info: 'info', warn: 'warn', error: 'bad', fatal: 'bad' };
+  let logPoll = null;
+  async function loadLogs() {
+    const qs = new URLSearchParams({ level: $('logLevel').value, limit: '300' });
+    if ($('logSearch').value.trim()) qs.set('q', $('logSearch').value.trim());
+    const { logs } = await api('/api/logs?' + qs);
+    const rows = logs.map((l) => ({ ...l, ctxText: l.ctx ? JSON.stringify(l.ctx) : '' }));
+    const g = makeGrid('logs', $('gridLogs'), {
+      columnDefs: [
+        { field: 'ts', headerName: 'Time', width: 160, sort: 'desc', valueFormatter: (p) => new Date(p.value).toLocaleTimeString() + '.' + String(new Date(p.value).getMilliseconds()).padStart(3, '0') },
+        { field: 'level', headerName: 'Level', width: 90, filter: 'agSetColumnFilter', cellRenderer: (p) => chip(p.value, LEVEL_COLOR[p.value] || 'mute') },
+        { field: 'msg', headerName: 'Event', width: 260, filter: 'agTextColumnFilter' },
+        { field: 'ctxText', headerName: 'Context', flex: 1, minWidth: 320, tooltipField: 'ctxText' },
+        { field: 'request_id', headerName: 'Request', width: 120, valueFormatter: (p) => (p.value ? p.value.slice(0, 8) : '') , tooltipField: 'request_id' },
+        { field: 'run_id', headerName: 'Run', width: 110, valueFormatter: (p) => (p.value ? p.value.slice(0, 8) : ''), tooltipField: 'run_id' }
+      ],
+      defaultColDef: { sortable: true, resizable: true, filter: true },
+      rowData: [], tooltipShowDelay: 300, overlayNoRowsTemplate: 'No log lines match'
+    });
+    g.setGridOption('rowData', rows);
+    $('logsNote').textContent = `${rows.length} lines · refreshes every 5 s · redacted at write time · also streamed as JSON to Render and Astropods`;
+    if (!logPoll) {
+      logPoll = setInterval(() => { if ($('view-logs').classList.contains('active')) loadLogs().catch(() => undefined); }, 5000);
+    }
+  }
+  $('logLevel').addEventListener('change', () => loadLogs());
+  $('logSearch').addEventListener('keydown', (e) => e.key === 'Enter' && loadLogs());
+  $('btnLogsRefresh').addEventListener('click', () => loadLogs());
 
   // ---------- boot ----------
   await loadCockpit();
