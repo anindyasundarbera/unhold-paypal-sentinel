@@ -66,7 +66,7 @@ describe('Step 6 & 7: Static UI Wireframes & Low-Code Integrations', async () =>
     assert.ok(agentIds.includes('agt-audit-officer'));
 
     assert.ok(spec.integrations.paypal.apis.length >= 5);
-    assert.equal(spec.integrations.ag_grid.component, 'AG Grid Community 34.3.1');
+    assert.equal(spec.integrations.ag_grid.component, 'AG Grid Enterprise 34.3.1 + AG Charts Enterprise 12.3.1');
   });
 
   test('Astropods Gateway queries AI endpoint or returns local fallback', async () => {

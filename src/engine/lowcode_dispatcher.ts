@@ -240,7 +240,7 @@ export function getAstropodsPodSpec(): AstropodsSpec {
         events: ['tracking.batch_uploaded', 'dispute.settled', 'payment.fraud_detected']
       },
       ag_grid: {
-        component: 'AG Grid Community 34.3.1',
+        component: 'AG Grid Enterprise 34.3.1 + AG Charts Enterprise 12.3.1',
         license_type: 'enterprise-trial'
       },
       render: {

@@ -141,28 +141,53 @@ export async function executeBatchTrackingUpload(
     // Generate deterministic idempotency request ID
     const requestId = `track-${hold.order_id.slice(-8)}-${manifest.tracking_number.slice(-8)}`;
 
-    try {
-      // Execute PayPal Orders Track call with capture_id
-      if (process.env.NODE_ENV !== 'test') {
-        try {
-          await paypal.addTracking(
-            hold.order_id,
-            {
-              tracking_number: manifest.tracking_number,
-              carrier: manifest.carrier,
-              capture_id: hold.txn_id,
-              notify_payer: true
-            },
-            requestId
-          );
-        } catch (err) {
-          // In local/sandbox development without live tunnel or with simulated seeded orders,
-          // we capture the API call attempt and log cleanly
-          console.warn(`[BATCH UPLOADER] PayPal API call for ${hold.order_id}: ${(err as Error).message}`);
-        }
-      }
+    // Simulation is explicit and labelled: tests, or UNHOLD_SIMULATE_UPLOADS=true for seeded
+    // holds that have no real PayPal order behind them. Otherwise a failed PayPal call stays failed.
+    const simulate = process.env.NODE_ENV === 'test' || process.env.UNHOLD_SIMULATE_UPLOADS === 'true';
 
-      // Update SQLite Ledger with new tracking and expedited wi_date
+    if (!simulate) {
+      try {
+        await paypal.addTracking(
+          hold.order_id,
+          {
+            tracking_number: manifest.tracking_number,
+            carrier: manifest.carrier,
+            capture_id: hold.txn_id,
+            notify_payer: true
+          },
+          requestId
+        );
+      } catch (err) {
+        const message = (err as Error).message;
+        totalFailed++;
+        const failEntry = await ledger.appendAuditEntry({
+          actor: 'Batch Tracking Uploader',
+          action: 'POST /v2/checkout/orders/{id}/track',
+          target: hold.order_id,
+          requestId,
+          result: 'error',
+          detail: `PayPal rejected tracking ${manifest.carrier} #${manifest.tracking_number}: ${message.slice(0, 300)}`
+        });
+        items.push({
+          hold_id: hold.id,
+          order_id: hold.order_id,
+          tracking_number: manifest.tracking_number,
+          carrier: manifest.carrier,
+          amount: hold.amount,
+          status: 'FAILED',
+          prior_exp_at: hold.exp_at,
+          expedited_release_at: null,
+          days_saved: 0,
+          audit_block_id: failEntry.block_id,
+          audit_hash: failEntry.hash,
+          error: message
+        });
+        continue;
+      }
+    }
+
+    try {
+      // Update the ledger with new tracking and expedited release date
       const expeditedDate = hold.wi_date || hold.exp_at;
       await ledger.updateHoldTracking(
         hold.id,
@@ -178,8 +203,8 @@ export async function executeBatchTrackingUpload(
         action: 'POST /v2/checkout/orders/{id}/track',
         target: hold.order_id,
         requestId: requestId,
-        result: '201',
-        detail: `Uploaded ${manifest.carrier} #${manifest.tracking_number}; expedited release from ${hold.exp_at?.slice(0, 10)} to ${expeditedDate?.slice(0, 10)} (~${daysSaved.toFixed(1)} days sooner)`
+        result: simulate ? 'simulated' : '201',
+        detail: `${simulate ? '[SIMULATED] ' : ''}Uploaded ${manifest.carrier} #${manifest.tracking_number}; expedited release from ${hold.exp_at?.slice(0, 10)} to ${expeditedDate?.slice(0, 10)} (~${daysSaved.toFixed(1)} days sooner)`
       });
 
       totalUploaded++;

@@ -1,353 +1,404 @@
-// Unhold SaaS Frontend Application Controller
-// Connects UI components and AG Grid directly to live Fastify backend endpoints
-
-(function() {
+// Unhold cockpit — every screen is an AG Grid (Enterprise). Controls (buttons, inputs) are plain HTML.
+(async function () {
   'use strict';
 
-  let gridApi = null;
-  let allHolds = [];
-  let waterfallData = null;
-  let currentWaterfallMode = 'now'; // 'now' or 'plan'
+  const money = (v) => '$' + Number(v || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const day = (iso) => (iso ? new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '—');
+  const $ = (id) => document.getElementById(id);
+  const api = async (path, opts) => {
+    const res = await fetch(path, opts);
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(body.error || body.message || `HTTP ${res.status}`);
+    return body;
+  };
+  const post = (path, payload) =>
+    api(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload || {}) });
+  const setStatus = (id, text, kind) => {
+    const el = $(id);
+    el.textContent = text || '';
+    el.className = 'status' + (kind ? ' ' + kind : '');
+  };
 
-  // --- Utility Helpers ---
-  const formatMoney = (val) => '$' + Number(val || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  const formatDate = (isoStr) => isoStr ? new Date(isoStr).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '—';
+  // ---------- AG Grid Enterprise setup ----------
+  const cfg = await api('/api/config').catch(() => ({ integrations: {} }));
+  if (cfg.agGridLicenseKey) agGrid.LicenseManager.setLicenseKey(cfg.agGridLicenseKey);
+  agGrid.ModuleRegistry.registerModules([agGrid.AllEnterpriseModule.with(agCharts.AgChartsEnterpriseModule)]);
 
-  // --- Tab Navigation ---
-  function initTabs() {
-    const tabBtns = document.querySelectorAll('.tab-btn');
-    const panels = document.querySelectorAll('.view-panel');
+  const theme = agGrid.themeQuartz.withParams({
+    backgroundColor: '#0d1117',
+    foregroundColor: '#e6edf3',
+    headerBackgroundColor: '#161b22',
+    oddRowBackgroundColor: '#10151c',
+    borderColor: '#30363d',
+    accentColor: '#58a6ff',
+    chromeBackgroundColor: '#161b22',
+    fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, sans-serif',
+    fontSize: 13
+  });
 
-    tabBtns.forEach(btn => {
-      btn.addEventListener('click', () => {
-        const target = btn.getAttribute('data-tab');
-        tabBtns.forEach(b => b.classList.remove('active'));
-        panels.forEach(p => p.classList.remove('active'));
-
-        btn.classList.add('active');
-        const activePanel = document.getElementById('tab-' + target);
-        if (activePanel) activePanel.classList.add('active');
-
-        // Lazy load views
-        if (target === 'ledger' && !gridApi) {
-          initGrid();
-        } else if (target === 'matcher') {
-          loadMatcher();
-        } else if (target === 'audit') {
-          loadAudit();
-        }
-      });
-    });
+  const grids = {};
+  function makeGrid(key, el, options) {
+    if (grids[key]) return grids[key];
+    grids[key] = agGrid.createGrid(el, { theme, animateRows: true, ...options });
+    return grids[key];
   }
+  const chip = (text, kind) => {
+    const colors = { good: '#3fb950', warn: '#d29922', bad: '#f85149', info: '#58a6ff', mute: '#8b949e' };
+    const c = colors[kind] || colors.mute;
+    return `<span style="color:${c};border:1px solid ${c}55;border-radius:999px;padding:1px 9px;font-size:11px">${text}</span>`;
+  };
 
-  // --- 1. Cockpit & Summary Data ---
-  async function loadSummary() {
-    try {
-      const res = await fetch('/api/summary');
-      if (!res.ok) throw new Error('Failed to fetch summary');
-      const data = await res.json();
+  // ---------- Header badges ----------
+  (function renderBadges() {
+    const i = cfg.integrations || {};
+    const items = [
+      ['PayPal ' + (cfg.paypalEnvironment || 'sandbox'), 'live'],
+      ['Simulated seller history', 'sim'],
+      cfg.simulateUploads ? ['Uploads simulated', 'sim'] : ['Uploads hit PayPal', 'on'],
+      ...Object.entries({ Zapier: i.zapier, Astropods: i.astropods, Elastic: i.elastic, KERNEL: i.kernel, Channel3: i.channel3 }).map(
+        ([name, on]) => [name + (on ? ' connected' : ' off'), on ? 'on' : '']
+      )
+    ];
+    $('badges').innerHTML = items.map(([t, k]) => `<span class="badge ${k}">${t}</span>`).join('');
+  })();
 
-      document.getElementById('kpiHeld').textContent = formatMoney(data.total_withheld_usd);
-      document.getElementById('kpiHoldCount').textContent = data.open_holds_count;
-      document.getElementById('kpiSpeedable').textContent = formatMoney(data.speedable_amount_usd);
-      document.getElementById('kpiHealthScore').innerHTML = `${data.health_score}<span style="font-size:16px;color:var(--text-muted)">/100</span>`;
-      document.getElementById('kpiHealthBand').textContent = data.health_band;
-      document.getElementById('healthFill').style.width = `${data.health_score}%`;
+  // ---------- Tabs (grids are created lazily so they size correctly) ----------
+  const loaders = {
+    cockpit: loadCockpit,
+    holds: loadHolds,
+    matcher: loadMatcher,
+    timeline: loadTimeline,
+    forecast: () => (grids.outcome ? null : initForecastGrids()),
+    guard: initGuardGrid,
+    disputes: loadDisputes,
+    audit: loadAudit
+  };
+  document.querySelectorAll('#tabs button').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('#tabs button').forEach((b) => b.classList.toggle('active', b === btn));
+      document.querySelectorAll('.view').forEach((v) => v.classList.toggle('active', v.id === 'view-' + btn.dataset.tab));
+      Promise.resolve(loaders[btn.dataset.tab]?.()).catch((e) => console.error(e));
+    });
+  });
 
-      if (data.health_score >= 70) {
-        document.getElementById('kpiHealthBand').className = 'chip chip-good';
-        document.getElementById('healthFill').style.background = '#2ea043';
+  // ================= Cockpit =================
+  let waterfall = null;
+  let waterfallMode = 'now';
+
+  async function loadCockpit() {
+    const [summary, wf, why] = await Promise.all([api('/api/summary'), api('/api/waterfall'), api('/api/why-held')]);
+    waterfall = wf;
+
+    const series = (b) => b.filter((x) => x.startDate !== 'unknown').map((x) => x.amount);
+    const kpiRow = [
+      {
+        held: summary.total_withheld_usd, holds: summary.open_holds_count,
+        speed: summary.speedable_amount_usd, orders: summary.speedable_holds_count, days: summary.avg_days_sooner,
+        health: summary.health_score, band: summary.health_band,
+        heldSeries: series(wf.currentBuckets), speedSeries: series(wf.expeditedBuckets)
       }
-    } catch (err) {
-      console.warn('Using seed fallback for summary:', err);
-    }
-  }
-
-  // --- Waterfall Visualization ---
-  async function loadWaterfall() {
-    try {
-      const res = await fetch('/api/waterfall');
-      if (!res.ok) throw new Error('Waterfall fetch failed');
-      waterfallData = await res.json();
-      renderWaterfall();
-    } catch (err) {
-      console.warn('Waterfall fallback:', err);
-    }
-  }
-
-  function renderWaterfall() {
-    if (!waterfallData) return;
-    const container = document.getElementById('waterfallBars');
-    container.innerHTML = '';
-
-    const isPlan = currentWaterfallMode === 'plan';
-    const buckets = waterfallData.buckets || [];
-    const maxVal = Math.max(...buckets.map(b => isPlan ? (b.planned_amount || b.baseline_amount) : b.baseline_amount), 1500);
-
-    buckets.forEach(b => {
-      const amount = isPlan ? (b.planned_amount !== undefined ? b.planned_amount : b.baseline_amount) : b.baseline_amount;
-      const heightPct = Math.max(12, Math.round((amount / maxVal) * 100));
-
-      const col = document.createElement('div');
-      col.className = 'wf-bucket';
-      col.innerHTML = `
-        <span class="wf-amount">${formatMoney(amount)}</span>
-        <div class="wf-bar ${isPlan && b.diff < 0 ? 'accelerated' : ''}" style="height:${heightPct}%;"></div>
-        <span class="wf-label">${b.label}</span>
-      `;
-      container.appendChild(col);
+    ];
+    const spark = (field) => ({
+      field, headerName: '', cellRenderer: 'agSparklineCellRenderer',
+      cellRendererParams: { sparklineOptions: { type: 'area', fill: 'rgba(88,166,255,.25)', stroke: '#58a6ff', axis: { stroke: 'transparent' } } }
     });
+    const kpi = makeGrid('kpi', $('gridKpi'), {
+      columnDefs: [
+        { headerName: 'Held by PayPal', field: 'held', valueFormatter: (p) => money(p.value), cellStyle: { fontSize: '22px', fontWeight: 700 }, flex: 1.1 },
+        { ...spark('heldSeries'), headerName: 'Releases by week', flex: 1 },
+        { headerName: 'Can speed up now', field: 'speed', valueFormatter: (p) => money(p.value), cellStyle: { fontSize: '22px', fontWeight: 700, color: '#3fb950' }, flex: 1.1 },
+        { headerName: 'Orders · days sooner', valueGetter: (p) => `${p.data.orders} orders · ${p.data.days} days`, flex: 1 },
+        { ...spark('speedSeries'), headerName: 'After tracking', flex: 1 },
+        {
+          headerName: 'Account health', field: 'health', flex: 0.9,
+          cellRenderer: (p) => `<span style="font-size:22px;font-weight:700">${p.value}</span><span style="color:#8b949e">/100</span> ${chip(p.data.band, p.value >= 70 ? 'good' : 'warn')}`
+        }
+      ],
+      rowData: kpiRow, rowHeight: 64, headerHeight: 34, suppressMovableColumns: true, suppressCellFocus: true
+    });
+    kpi.setGridOption('rowData', kpiRow);
+
+    // Waterfall: bucket grid + integrated chart built from it
+    const buckets = bucketRows(wf);
+    const bg = makeGrid('buckets', $('gridBuckets'), {
+      columnDefs: [
+        { headerName: 'Release week', field: 'label', flex: 1.4 },
+        { headerName: 'Releases now', field: 'now', valueFormatter: (p) => money(p.value), chartDataType: 'series', flex: 1 },
+        { headerName: 'If tracking uploaded', field: 'after', valueFormatter: (p) => money(p.value), chartDataType: 'series', flex: 1 },
+        { headerName: 'Holds', field: 'holds', flex: 0.5 }
+      ],
+      rowData: buckets, enableCharts: true, cellSelection: true, suppressCellFocus: false
+    });
+    bg.setGridOption('rowData', buckets);
+    renderWaterfallChart();
+    $('waterfallNote').textContent = `${wf.shiftedHoldsCount} holds move ~${wf.avgDaysEarlier} days earlier (${money(wf.shiftedAmountUsd)}).`;
+
+    // Why held
+    const drivers = (why.drivers || []).map((d) => ({
+      title: d.title, severity: d.severity, detail: d.detail, rule: d.paypal_reason, evidence: (d.evidence_ids || []).length
+    }));
+    const wg = makeGrid('why', $('gridWhy'), {
+      columnDefs: [
+        { headerName: 'Driver', field: 'title', flex: 1, minWidth: 130, wrapText: true, autoHeight: true, tooltipField: 'rule' },
+        { headerName: 'Severity', field: 'severity', width: 100, cellRenderer: (p) => chip(p.value, p.value === 'HIGH' ? 'bad' : 'warn') },
+        { headerName: 'What we found', field: 'detail', flex: 2, minWidth: 200, wrapText: true, autoHeight: true, tooltipField: 'rule' }
+      ],
+      rowData: drivers, tooltipShowDelay: 300
+    });
+    wg.setGridOption('rowData', drivers);
+    $('whyNote').textContent = why.plain_english_explanation || '';
   }
 
-  // --- Why Held Diagnostic Drivers ---
-  async function loadWhyHeld() {
-    try {
-      const res = await fetch('/api/why-held');
-      if (!res.ok) return;
-      const data = await res.json();
-      const list = document.getElementById('driverList');
-      list.innerHTML = '';
-
-      (data.drivers || []).forEach(d => {
-        const item = document.createElement('div');
-        item.className = 'driver-item';
-        item.innerHTML = `
-          <div class="driver-icon">⚠️</div>
-          <div class="driver-content">
-            <div class="driver-title">${d.title}</div>
-            <div class="driver-desc">${d.description}</div>
-            <div class="driver-meta">Rule: ${d.code} · Impact: ${d.impact} · Citation: ${d.official_citation}</div>
-          </div>
-        `;
-        list.appendChild(item);
-      });
-    } catch (err) {
-      console.warn('Why-held load error:', err);
-    }
+  function bucketRows(wf) {
+    return wf.currentBuckets
+      .map((b, i) => ({ label: b.label, now: b.amount, after: (wf.expeditedBuckets[i] || {}).amount || 0, holds: b.holdsCount }))
+      .filter((r) => !/undated/i.test(r.label) || r.now > 0);
   }
 
-  // --- 2. AG Grid Holds Ledger ---
-  async function initGrid() {
-    const gridDiv = document.getElementById('holdsGrid');
-    if (!gridDiv || gridApi) return;
-
-    try {
-      const res = await fetch('/api/holds');
-      const json = await res.json();
-      allHolds = json.holds || [];
-      document.getElementById('ledgerCountBadge').textContent = `${allHolds.length} Records`;
-
-      const columnDefs = [
-        {
-          headerName: 'Hold ID',
-          field: 'id',
-          width: 120,
-          checkboxSelection: true,
-          headerCheckboxSelection: true,
-          pinned: 'left'
-        },
-        {
-          headerName: 'Order Details',
-          field: 'order_id',
-          width: 200,
-          cellRenderer: params => {
-            const h = params.data;
-            return `<div><strong>${h.order_id}</strong><br><span style="font-size:11px;color:var(--text-muted)">${h.buyer_name || 'Buyer'}</span></div>`;
-          }
-        },
-        {
-          headerName: 'Amount',
-          field: 'amount',
-          width: 110,
-          type: 'rightAligned',
-          valueFormatter: p => formatMoney(p.value),
-          cellStyle: { fontWeight: '600', color: '#f0f6fc' }
-        },
-        {
-          headerName: 'PayPal Code',
-          field: 'code',
-          width: 130,
-          cellRenderer: p => `<span class="chip chip-info">${p.value}</span>`
-        },
-        {
-          headerName: 'Tracking Status',
-          field: 'tracking_status',
-          width: 150,
-          cellRenderer: p => {
-            const s = p.value;
-            if (s === 'UPLOADED') return `<span class="chip chip-good">Uploaded</span>`;
-            if (s === 'READY_TO_UPLOAD') return `<span class="chip chip-warn">Ready to Upload</span>`;
-            return `<span class="chip" style="background:#21262d;color:#8b949e">Missing</span>`;
-          }
-        },
-        {
-          headerName: 'Carrier & Tracking',
-          field: 'tracking_number',
-          width: 180,
-          valueGetter: p => p.data.tracking_number ? `${p.data.carrier || ''}: ${p.data.tracking_number}` : '—'
-        },
-        {
-          headerName: 'Expected Release',
-          field: 'exp_at',
-          width: 140,
-          valueFormatter: p => formatDate(p.value)
-        },
-        {
-          headerName: 'Accelerated Date',
-          field: 'wi_date',
-          width: 140,
-          cellRenderer: p => p.value ? `<span style="color:#3fb950;font-weight:600">${formatDate(p.value)}</span>` : '—'
-        },
-        {
-          headerName: 'Action',
-          field: 'action',
-          width: 130,
-          cellRenderer: p => {
-            if (p.data.tracking_status === 'READY_TO_UPLOAD') {
-              return `<button class="btn btn-primary" style="padding:2px 8px;font-size:11px;" onclick="window.uploadSingleHold('${p.data.id}')">Upload</button>`;
+  function renderWaterfallChart() {
+    const grid = grids.buckets;
+    if (!grid) return;
+    if (grids.waterfallChart) grids.waterfallChart.destroyChart();
+    const rows = grid.getDisplayedRowCount();
+    const cols = waterfallMode === 'now' ? ['now'] : ['now', 'after'];
+    grids.waterfallChart = grid.createRangeChart({
+      chartContainer: $('waterfallChart'),
+      cellRange: { rowStartIndex: 0, rowEndIndex: rows - 1, columns: ['label', ...cols] },
+      chartType: 'groupedColumn',
+      suppressChartRanges: true,
+      chartThemeName: 'ag-vivid-dark',
+      chartThemeOverrides: {
+        common: {
+          background: { fill: '#161b22' },
+          padding: { top: 12, right: 16, bottom: 8, left: 8 },
+          legend: { item: { label: { color: '#e6edf3' } } },
+          axes: {
+            category: { label: { color: '#8b949e' }, line: { stroke: '#30363d' } },
+            number: {
+              label: { color: '#8b949e', formatter: (p) => '$' + Number(p.value).toLocaleString('en-US') },
+              gridLine: { style: [{ stroke: '#30363d' }] }
             }
-            return `<span style="color:var(--text-muted);font-size:11px;">${p.data.tracking_status || 'Waiting'}</span>`;
           }
         }
-      ];
+      }
+    });
+  }
 
-      const gridOptions = {
-        theme: 'legacy',
-        columnDefs: columnDefs,
-        rowData: allHolds,
-        rowHeight: 46,
-        defaultColDef: {
-          sortable: true,
-          filter: true,
-          resizable: true
+  $('btnWaterfallMode').addEventListener('click', () => {
+    waterfallMode = waterfallMode === 'now' ? 'after' : 'now';
+    $('btnWaterfallMode').textContent = waterfallMode === 'now' ? 'Show if all tracking is uploaded' : 'Show releases as PayPal has them now';
+    renderWaterfallChart();
+  });
+
+  // ================= Holds =================
+  const holdColumns = [
+    { field: 'id', headerName: 'Hold', width: 150, pinned: 'left', checkboxSelection: true, headerCheckboxSelection: true, rowGroup: false },
+    { field: 'order_id', headerName: 'Order', width: 170 },
+    { field: 'buyer', headerName: 'Buyer', width: 130, filter: 'agTextColumnFilter' },
+    { field: 'item', headerName: 'Item', width: 170, filter: 'agTextColumnFilter' },
+    { field: 'amount', headerName: 'Amount', width: 120, type: 'rightAligned', filter: 'agNumberColumnFilter', aggFunc: 'sum', valueFormatter: (p) => money(p.value) },
+    { field: 'code', headerName: 'PayPal code', width: 120, filter: 'agSetColumnFilter', enableRowGroup: true },
+    {
+      field: 'status', headerName: 'State', width: 150, filter: 'agSetColumnFilter', enableRowGroup: true,
+      valueFormatter: (p) => ({ in_paypal: 'Tracking in PayPal', seller_has: 'Ready to upload', not_shipped: 'Not shipped', reserve: 'Reserve', unapproved: 'Needs approval' }[p.value] || p.value)
+    },
+    { field: 'carrier', headerName: 'Carrier', width: 100, filter: 'agSetColumnFilter', enableRowGroup: true },
+    { field: 'tracking_number', headerName: 'Tracking', width: 160 },
+    { field: 'delivered_at', headerName: 'Delivered', width: 120, filter: 'agDateColumnFilter', valueFormatter: (p) => day(p.value), filterValueGetter: (p) => (p.data.delivered_at || '').slice(0, 10) },
+    { field: 'exp_at', headerName: 'PayPal releases', width: 140, filter: 'agDateColumnFilter', valueFormatter: (p) => day(p.value), filterValueGetter: (p) => (p.data.exp_at || '').slice(0, 10) },
+    { field: 'wi_date', headerName: 'If tracking uploaded', width: 160, valueFormatter: (p) => day(p.value), cellStyle: { color: '#3fb950', fontWeight: 600 } },
+    { field: 'conf', headerName: 'Confidence', width: 110, filter: 'agSetColumnFilter' }
+  ];
+
+  async function loadHolds() {
+    const { holds } = await api('/api/holds');
+    const g = makeGrid('holds', $('gridHolds'), {
+      columnDefs: holdColumns,
+      defaultColDef: { sortable: true, resizable: true, filter: true, floatingFilter: false },
+      rowData: holds, rowSelection: { mode: 'multiRow', checkboxes: false, headerCheckbox: false },
+      sideBar: { toolPanels: ['columns', 'filters'], defaultToolPanel: '' },
+      rowGroupPanelShow: 'always', groupDisplayType: 'multipleColumns', suppressAggFuncInHeader: true,
+      statusBar: { statusPanels: [
+        { statusPanel: 'agTotalAndFilteredRowCountComponent', align: 'left' },
+        { statusPanel: 'agSelectedRowCountComponent' },
+        { statusPanel: 'agAggregationComponent', statusPanelParams: { aggFuncs: ['sum', 'avg'] } }
+      ] },
+      masterDetail: true, detailRowAutoHeight: true,
+      isRowMaster: () => true,
+      detailCellRendererParams: {
+        detailGridOptions: {
+          theme,
+          columnDefs: [{ field: 'field', headerName: 'Detail', width: 190 }, { field: 'value', headerName: '', flex: 1, wrapText: true, autoHeight: true }],
+          domLayout: 'autoHeight'
         },
-        rowSelection: 'multiple',
-        animateRows: true
-      };
-
-      if (window.agGrid && window.agGrid.createGrid) {
-        gridApi = window.agGrid.createGrid(gridDiv, gridOptions);
-      } else if (window.agGrid) {
-        gridApi = new window.agGrid.Grid(gridDiv, gridOptions);
-      }
-
-      // Quick filter
-      document.getElementById('gridSearch').addEventListener('input', (e) => {
-        if (gridApi && gridApi.setGridOption) {
-          gridApi.setGridOption('quickFilterText', e.target.value);
-        } else if (gridApi && gridApi.setQuickFilter) {
-          gridApi.setQuickFilter(e.target.value);
+        getDetailRowData: (params) => {
+          const h = params.data;
+          params.successCallback([
+            { field: 'Why held', value: h.reason },
+            { field: 'Release rule', value: h.rule },
+            { field: 'PayPal transaction', value: h.txn_id },
+            { field: 'Held since', value: h.held_at },
+            { field: 'Shipped', value: h.shipped_at || '—' },
+            { field: 'Delivered', value: h.delivered_at || '—' },
+            { field: 'Tracking uploaded', value: h.uploaded ? 'yes' : 'no' }
+          ]);
         }
-      });
-
-    } catch (err) {
-      console.error('Failed to initialize AG Grid:', err);
-    }
+      },
+      onGridReady: () => {}
+    });
+    g.setGridOption('rowData', holds);
+    setStatus('holdsStatus', `${holds.length} holds · ${money(holds.reduce((a, h) => a + h.amount, 0))} held`);
   }
 
-  // --- 3. AI Tracking Matcher ---
-  async function loadMatcher() {
+  async function holdsAsk() {
+    const q = $('askInput').value.trim();
+    if (!q) return;
+    const g = grids.holds;
+    if (!g) return;
+    $('btnAsk').disabled = true;
+    setStatus('holdsStatus', 'Asking…');
     try {
-      const res = await fetch('/api/manifests/match', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({})
-      });
-      const data = await res.json();
-      const tbody = document.getElementById('matcherTableBody');
-      tbody.innerHTML = '';
-
-      (data.matches || []).slice(0, 38).forEach(m => {
-        const tr = document.createElement('tr');
-        const tierBadge = m.match_tier === 'tier1_exact' 
-          ? '<span class="chip chip-good">Tier 1: Exact</span>'
-          : (m.match_tier === 'tier2_rule' 
-              ? '<span class="chip chip-info">Tier 2: Rule</span>' 
-              : '<span class="chip chip-warn">Tier 3: AI Nickname</span>');
-
-        tr.innerHTML = `
-          <td><code>${m.hold_id}</code></td>
-          <td><strong>${m.order_id}</strong></td>
-          <td>${m.buyer_name || 'Buyer'}</td>
-          <td>${m.carrier}</td>
-          <td><code>${m.tracking_number}</code></td>
-          <td>${tierBadge}</td>
-          <td><strong style="color:#3fb950">+${m.days_accelerated || 12.4} days</strong></td>
-          <td><span class="chip chip-good">Verified</span></td>
-        `;
-        tbody.appendChild(tr);
-      });
-    } catch (err) {
-      console.warn('Matcher error:', err);
-    }
-  }
-
-  // --- Batch Upload to PayPal Sandbox ---
-  async function triggerBatchUpload() {
-    const btn = document.getElementById('btnUploadBatch');
-    btn.disabled = true;
-    btn.textContent = 'Uploading to PayPal...';
-
-    try {
-      const res = await fetch('/api/manifests/upload', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ autoOnly: true, dryRun: false })
-      });
-      const data = await res.json();
-
-      alert(`✅ PayPal Upload Complete!\n\nSuccessfully uploaded ${data.total_uploaded} tracking numbers.\nAccelerated: $${data.total_usd_accelerated.toFixed(2)}\nAccount Health Score increased from ${data.health_score_before} to ${data.health_score_after}!`);
-
-      // Refresh data
-      await loadSummary();
-      await loadWaterfall();
-      if (gridApi) {
-        const holdsRes = await fetch('/api/holds');
-        const holdsJson = await holdsRes.json();
-        if (gridApi.setGridOption) {
-          gridApi.setGridOption('rowData', holdsJson.holds);
-        } else if (gridApi.setRowData) {
-          gridApi.setRowData(holdsJson.holds);
-        }
-      }
-    } catch (err) {
-      alert('Upload failed: ' + err.message);
+      const values = (field) => [...new Set(g.getGridOption('rowData').map((r) => r[field]).filter(Boolean))].slice(0, 12);
+      const columns = [
+        { field: 'id', headerName: 'Hold', type: 'text' },
+        { field: 'order_id', headerName: 'Order', type: 'text' },
+        { field: 'buyer', headerName: 'Buyer', type: 'text' },
+        { field: 'item', headerName: 'Item', type: 'text' },
+        { field: 'amount', headerName: 'Amount (USD)', type: 'number' },
+        { field: 'code', headerName: 'PayPal code', type: 'set', values: values('code') },
+        { field: 'status', headerName: 'State (in_paypal=tracking in PayPal, seller_has=ready to upload, not_shipped, reserve, unapproved)', type: 'set', values: values('status') },
+        { field: 'carrier', headerName: 'Carrier', type: 'set', values: values('carrier') },
+        { field: 'delivered_at', headerName: 'Delivered date', type: 'date' },
+        { field: 'exp_at', headerName: 'PayPal release date', type: 'date' },
+        { field: 'conf', headerName: 'Confidence', type: 'set', values: values('conf') }
+      ];
+      const r = await post('/api/ai/grid-query', { question: q, columns });
+      g.setFilterModel(Object.keys(r.filterModel).length ? r.filterModel : null);
+      g.setRowGroupColumns(r.rowGroup);
+      g.applyColumnState({ defaultState: { sort: null }, state: r.sort.map((s, i) => ({ colId: s.colId, sort: s.sort, sortIndex: i })) });
+      setStatus('holdsStatus', `${r.explanation} (${r.model}, ${r.ms} ms)`, 'good');
+    } catch (e) {
+      setStatus('holdsStatus', e.message, 'bad');
     } finally {
-      btn.disabled = false;
-      btn.textContent = '⚡ Upload 38 Matched Trackers';
+      $('btnAsk').disabled = false;
     }
   }
+  $('btnAsk').addEventListener('click', holdsAsk);
+  $('askInput').addEventListener('keydown', (e) => e.key === 'Enter' && holdsAsk());
+  $('btnClearFilters').addEventListener('click', () => {
+    const g = grids.holds;
+    if (!g) return;
+    g.setFilterModel(null);
+    g.setRowGroupColumns([]);
+    g.applyColumnState({ defaultState: { sort: null } });
+    setStatus('holdsStatus', '');
+  });
 
-  // --- 4. Cash Goal Forecaster ---
-  async function simulateCashGoal() {
-    const amount = Number(document.getElementById('goalAmount').value) || 4500;
-    const days = Number(document.getElementById('goalDays').value) || 11;
-    const conf = Number(document.getElementById('goalConfidence').value) || 0.8;
-
+  async function uploadOrders(orderIds, statusId) {
+    if (!orderIds.length) return setStatus(statusId, 'Select at least one order first.', 'bad');
+    setStatus(statusId, `Uploading ${orderIds.length} tracking numbers to PayPal…`);
     try {
-      const res = await fetch('/api/cash-goal/plan', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ goalAmount: amount, goalDay: days, confidence: conf })
-      });
-      const data = await res.json();
+      const r = await post('/api/manifests/upload', { orderIds, autoOnly: false, dryRun: false });
+      const failed = r.total_failed ? ` · ${r.total_failed} failed (${(r.items.find((i) => i.status === 'FAILED') || {}).error || 'see audit'})` : '';
+      setStatus(statusId, `${r.total_uploaded} uploaded · ${money(r.total_usd_accelerated)} released ~${r.avg_days_saved} days sooner · health ${r.health_score_before} → ${r.health_score_after}${failed}`, r.total_failed ? 'bad' : 'good');
+      await Promise.all([loadCockpit(), refreshHolds(), refreshAudit()]);
+    } catch (e) {
+      setStatus(statusId, e.message, 'bad');
+    }
+  }
+  async function refreshHolds() {
+    if (!grids.holds) return;
+    const { holds } = await api('/api/holds');
+    grids.holds.setGridOption('rowData', holds);
+  }
+  $('btnUploadSelected').addEventListener('click', () => {
+    const rows = grids.holds ? grids.holds.getSelectedRows() : [];
+    uploadOrders(rows.filter((r) => r.status === 'seller_has').map((r) => r.order_id), 'holdsStatus');
+  });
 
-      document.getElementById('resBaselineProb').textContent = `${Math.round((data.baseline_probability || 0.24) * 100)}%`;
-      document.getElementById('resUpliftedProb').textContent = `${Math.round((data.uplifted_probability || 0.87) * 100)}%`;
+  // ================= Tracking matcher =================
+  async function loadMatcher() {
+    setStatus('matcherStatus', 'Matching carrier manifests to PayPal orders…');
+    const data = await post('/api/manifests/match', {});
+    const rows = data.matches || [];
+    const g = makeGrid('matcher', $('gridMatcher'), {
+      columnDefs: [
+        { headerName: '', width: 52, checkboxSelection: true, headerCheckboxSelection: true, pinned: 'left' },
+        { field: 'tracking_number', headerName: 'Tracking', width: 160 },
+        { field: 'carrier', headerName: 'Carrier', width: 100, filter: 'agSetColumnFilter' },
+        { field: 'matched_order_id', headerName: 'PayPal order', width: 170 },
+        { field: 'hold_amount', headerName: 'Amount', width: 110, valueFormatter: (p) => money(p.value), aggFunc: 'sum' },
+        {
+          field: 'match_method', headerName: 'How matched', width: 130, filter: 'agSetColumnFilter',
+          valueFormatter: (p) => ({ id: 'Order ID', rule: 'Rule', ai: 'AI', ask: 'Ask you' }[p.value] || p.value)
+        },
+        {
+          field: 'confidence', headerName: 'Confidence', width: 130, sort: 'asc',
+          valueFormatter: (p) => `${Math.round((p.value || 0) * 100)}%`,
+          cellRenderer: (p) => chip(`${Math.round((p.value || 0) * 100)}%`, p.value >= 0.9 ? 'good' : p.value >= 0.8 ? 'info' : 'warn')
+        },
+        { field: 'match_reason', headerName: 'Why', flex: 1, minWidth: 260, wrapText: true, autoHeight: true },
+        { field: 'days_sooner', headerName: 'Days sooner', width: 120, valueFormatter: (p) => `+${p.value}` },
+        { field: 'decision', headerName: 'Decision', width: 120, editable: true, cellEditor: 'agSelectCellEditor', cellEditorParams: { values: ['auto', 'you', 'ask', 'none'] } }
+      ],
+      defaultColDef: { sortable: true, resizable: true, filter: true },
+      rowData: rows, rowSelection: { mode: 'multiRow', checkboxes: false, headerCheckbox: false },
+      statusBar: { statusPanels: [{ statusPanel: 'agTotalAndFilteredRowCountComponent' }, { statusPanel: 'agSelectedRowCountComponent' }, { statusPanel: 'agAggregationComponent', statusPanelParams: { aggFuncs: ['sum'] } }] }
+    });
+    g.setGridOption('rowData', rows);
+    g.forEachNode((n) => n.setSelected(n.data.decision === 'auto' && n.data.confidence >= 0.8));
+    setStatus('matcherStatus', `${data.matched_count} of ${data.total_manifests} matched · ${data.auto_count} auto-approved · ${data.review_count} need review · ${money(data.total_potential_acceleration_usd)} can be released sooner`);
+  }
+  $('btnRunMatcher').addEventListener('click', loadMatcher);
+  $('btnUploadApproved').addEventListener('click', () => {
+    const rows = grids.matcher ? grids.matcher.getSelectedRows() : [];
+    uploadOrders(rows.map((r) => r.matched_order_id), 'matcherStatus').then(loadMatcher);
+  });
 
-      const list = document.getElementById('goalActionPlan');
-      list.innerHTML = `
-        <li>Upload ${data.suggested_actions?.upload_trackers_count || 38} matched tracking numbers (+${Math.round(((data.uplifted_probability || 0.87) - (data.baseline_probability || 0.24)) * 100)}% jump in confidence).</li>
-        <li>Fulfill high-value pending orders with signature confirmation.</li>
-        <li>Estimated cash available on Day ${days}: <strong>${formatMoney(data.projected_cash_at_day || 4720)}</strong>.</li>
-      `;
-    } catch (err) {
-      console.warn('Cash goal sim error:', err);
+  // ================= Release timeline (Bryntum) =================
+  async function loadTimeline() {
+    if (window.unholdTimeline) {
+      const { holds } = await api('/api/holds');
+      await window.unholdTimeline.render($('timelineHost'), holds);
+    } else {
+      $('timelineHost').innerHTML = '<div class="note">The Bryntum timeline is not loaded yet.</div>';
     }
   }
 
-  // --- 5. Payment Guard (Anti-Scam) ---
-  const sampleScamEmail = `From: service@paypa1-security-alert.com
+  // ================= Cash goal =================
+  function initForecastGrids() {
+    makeGrid('outcome', $('gridOutcome'), {
+      columnDefs: [{ field: 'metric', headerName: 'Measure', flex: 1 }, { field: 'value', headerName: '', flex: 1, cellStyle: { fontWeight: 600 } }],
+      rowData: [], overlayNoRowsTemplate: 'Press “Plan it”'
+    });
+    makeGrid('plan', $('gridPlan'), {
+      columnDefs: [{ field: 'title', headerName: 'Action', flex: 1, wrapText: true, autoHeight: true }, { field: 'impactDescription', headerName: 'Effect', flex: 1.2, wrapText: true, autoHeight: true }],
+      rowData: [], overlayNoRowsTemplate: 'Press “Plan it”'
+    });
+  }
+  $('btnSimulateGoal').addEventListener('click', async () => {
+    initForecastGrids();
+    setStatus('forecastStatus', 'Running 2,000 simulated release paths…');
+    try {
+      const d = await post('/api/cash-goal/plan', {
+        goalAmount: Number($('goalAmount').value), goalDay: Number($('goalDays').value), confidence: Number($('goalConfidence').value)
+      });
+      const pct = (x) => `${Math.round((x || 0) * 100)}%`;
+      grids.outcome.setGridOption('rowData', [
+        { metric: 'Goal', value: `${money(d.goalAmount)} by day ${d.goalDay}` },
+        { metric: 'Chance as things stand', value: pct(d.baselineProb) },
+        { metric: 'Chance with the plan', value: pct(d.plannedProb) },
+        { metric: d.shortfallOrSurplus >= 0 ? 'Cushion' : 'Shortfall', value: money(Math.abs(d.shortfallOrSurplus)) }
+      ]);
+      grids.plan.setGridOption('rowData', d.selectedActions || []);
+      setStatus('forecastStatus', d.recommendedText, 'good');
+    } catch (e) {
+      setStatus('forecastStatus', e.message, 'bad');
+    }
+  });
+
+  // ================= Payment guard =================
+  const scamEmail = `From: service@paypa1-security-alert.com
 Subject: URGENT: Payment Received - Action Required
 Date: Mon, 9 Nov 2026 15:30:00 -0800
 
@@ -356,12 +407,10 @@ You have received a payment of $820.00 USD from customer M. Rossi for Order #ORD
 Transaction ID: CAP-FAKE-PHISHING-001
 
 STATUS: FUNDS ON TEMPORARY HOLD
-Because this is a high-value purchase, funds have been withheld by PayPal Anti-Fraud Department.
-To release these funds to your available balance immediately, you MUST ship the item within 12 hours via express courier and reply to this email with tracking number. Do not check your account dashboard as balance updates only after shipment confirmation.
+To release these funds you MUST ship the item within 12 hours via express courier and reply with the tracking number. Do not check your account dashboard.
 
 PayPal Security Protection Division`;
-
-  const sampleAuthenticEmail = `From: service@paypal.com
+  const realEmail = `From: service@paypal.com
 Subject: Notification of payment received
 Date: Mon, 9 Nov 2026 14:02:11 +0000
 
@@ -374,265 +423,152 @@ Shipping Address:
 San Francisco, CA 94105
 United States
 
-Seller Protection: Eligible
-We placed a temporary hold on this payment while we verify delivery. Upload tracking to release funds faster.`;
-
-  async function verifyEmail() {
-    const rawEmail = document.getElementById('txtEmailInput').value;
-    const box = document.getElementById('guardVerdictBox');
-    box.innerHTML = '<div style="color:var(--accent)">Analyzing email notice and verifying PayPal capture ID...</div>';
-
-    try {
-      const res = await fetch('/api/payment-guard/verify-email', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ rawEmail })
-      });
-      const data = await res.json();
-
-      if (data.verification_status === 'PHISHING_SCAM_BLOCKED' || !data.can_ship) {
-        box.innerHTML = `
-          <div style="color:#f85149;font-weight:700;font-size:15px;margin-bottom:8px;">🚨 SCAM DETECTED: DO NOT SHIP</div>
-          <div style="font-size:13px;color:var(--text);margin-bottom:8px;">${data.summary}</div>
-          <div style="font-size:12px;color:var(--text-muted);">
-            <strong>Red Flags:</strong>
-            <ul style="padding-left:18px;margin-top:4px;">
-              ${(data.red_flags || []).map(r => `<li>${r}</li>`).join('')}
-            </ul>
-          </div>
-          <div style="margin-top:10px;"><span class="chip chip-bad">Transaction Not Found (404)</span></div>
-        `;
-      } else {
-        box.innerHTML = `
-          <div style="color:#3fb950;font-weight:700;font-size:15px;margin-bottom:8px;">✅ AUTHENTIC PAYPAL PAYMENT VERIFIED</div>
-          <div style="font-size:13px;color:var(--text);margin-bottom:8px;">${data.summary}</div>
-          <div style="font-size:12px;color:var(--text-muted);">
-            Transaction ID: <code>${data.transaction_id}</code><br>
-            Captured Amount: <strong>${formatMoney(data.actual_amount || data.claimed_amount)}</strong>
-          </div>
-          <div style="margin-top:10px;"><span class="chip chip-good">Cleared for Pre-Flight</span></div>
-        `;
-      }
-    } catch (err) {
-      box.innerHTML = `<div style="color:var(--danger)">Error verifying email: ${err.message}</div>`;
-    }
-  }
-
-  // --- 6. Disputes & A2A ---
-  async function checkInjection() {
-    const text = document.getElementById('txtDisputeInput').value;
-    const resDiv = document.getElementById('injectionResult');
-    resDiv.innerHTML = '<span style="color:var(--accent)">Scanning prompt...</span>';
-
-    try {
-      const res = await fetch('/api/prompt-guard/check', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: text })
-      });
-      const data = await res.json();
-
-      const isInj = data.isInjected || data.is_injection || (data.riskScore && data.riskScore > 0.4) || (data.risk_score && data.risk_score > 0.4);
-      const score = data.riskScore !== undefined ? data.riskScore : (data.risk_score || 0);
-      const categories = (data.attackCategories && data.attackCategories.length > 0) ? data.attackCategories.join(', ') : (data.attack_category || 'PROMPT_INJECTION');
-
-      if (isInj) {
-        resDiv.innerHTML = `
-          <div style="padding:10px;background:rgba(248,81,73,0.1);border:1px solid #f85149;border-radius:6px;">
-            <strong style="color:#f85149">⛔ Injection Detected (Risk: ${(score * 100).toFixed(0)}%)</strong>
-            <p style="font-size:12px;color:var(--text);margin-top:4px;">Threat Category: <code>${categories}</code></p>
-            <p style="font-size:11px;color:var(--text-muted);margin-top:2px;">Circuit breaker tripped. Payout commands neutralized.</p>
-          </div>
-        `;
-      } else {
-        resDiv.innerHTML = `
-          <div style="padding:10px;background:rgba(63,185,80,0.1);border:1px solid #3fb950;border-radius:6px;">
-            <strong style="color:#3fb950">✅ Clean Customer Communication</strong>
-            <p style="font-size:12px;color:var(--text);margin-top:4px;">No prompt injection or override signatures detected.</p>
-          </div>
-        `;
-      }
-    } catch (err) {
-      resDiv.innerHTML = `<span style="color:var(--danger)">Error: ${err.message}</span>`;
-    }
-  }
-
-  async function runA2A() {
-    const box = document.getElementById('a2aTranscript');
-    box.innerHTML = '<div style="color:var(--accent);font-size:12px;">Initiating autonomous negotiation between Buyer Agent and Unhold Merchant Agent...</div>';
-
-    try {
-      const res = await fetch('/api/disputes/DISP-SEED-001/negotiate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ options: { maxTurns: 4, autoOfferCoupon: true } })
-      });
-      const data = await res.json();
-
-      box.innerHTML = '';
-      (data.turns || []).forEach(t => {
-        const item = document.createElement('div');
-        const isBuyer = t.sender === 'BUYER_AGENT';
-        item.style.padding = '8px 12px';
-        item.style.borderRadius = '6px';
-        item.style.fontSize = '12px';
-        item.style.background = isBuyer ? 'rgba(88,166,255,0.08)' : 'rgba(63,185,80,0.08)';
-        item.style.border = isBuyer ? '1px solid rgba(88,166,255,0.2)' : '1px solid rgba(63,185,80,0.2)';
-        item.innerHTML = `
-          <div style="display:flex;justify-content:space-between;margin-bottom:2px;">
-            <strong style="color:${isBuyer ? 'var(--accent)' : '#3fb950'}">${isBuyer ? '🤖 Buyer Agent' : '🛡️ Unhold Merchant Agent'}</strong>
-            <span style="font-size:10px;color:var(--text-muted);">Turn ${t.turn_number}</span>
-          </div>
-          <div>${t.message}</div>
-          ${t.evidence_attached ? `<div style="margin-top:4px;font-family:var(--mono);font-size:10px;color:var(--purple);">Attached: RFC 9901 SD-JWT Proof (${t.evidence_attached.type})</div>` : ''}
-          ${t.offer ? `<div style="margin-top:4px;font-family:var(--mono);font-size:10px;color:#d29922;">Offer: Store Credit $${t.offer.amount_usd}.00 (${t.offer.coupon_code})</div>` : ''}
-        `;
-        box.appendChild(item);
-      });
-
-      const resBadge = document.createElement('div');
-      resBadge.style.marginTop = '8px';
-      resBadge.innerHTML = `<span class="chip chip-good" style="font-size:12px;">🎉 Result: Mutual Settlement Dropped · Funds Released</span>`;
-      box.appendChild(resBadge);
-    } catch (err) {
-      box.innerHTML = `<div style="color:var(--danger)">A2A error: ${err.message}</div>`;
-    }
-  }
-
-  // --- 7. Cryptographic Audit Chain ---
-  async function loadAudit() {
-    try {
-      const res = await fetch('/api/audit');
-      const data = await res.json();
-      const tbody = document.getElementById('auditTableBody');
-      tbody.innerHTML = '';
-
-      (data.chain || []).slice(-15).reverse().forEach(b => {
-        const tr = document.createElement('tr');
-        tr.innerHTML = `
-          <td><code>#${b.block_id}</code></td>
-          <td>${formatDate(b.timestamp)}</td>
-          <td>${b.actor}</td>
-          <td><strong>${b.action}</strong></td>
-          <td><code>${b.target}</code></td>
-          <td><span class="chip chip-good">${b.result}</span></td>
-          <td title="${b.hash}"><code>${b.hash.slice(0, 16)}…</code></td>
-        `;
-        tbody.appendChild(tr);
-      });
-    } catch (err) {
-      console.warn('Audit fetch error:', err);
-    }
-  }
-
-  async function verifyAuditChain() {
-    const statusDiv = document.getElementById('auditVerifyStatus');
-    statusDiv.innerHTML = '<span style="color:var(--accent)">Verifying sequential SHA-256 hash proofs...</span>';
-
-    try {
-      const res = await fetch('/api/audit/verify', { method: 'POST' });
-      const data = await res.json();
-
-      if (data.valid) {
-        statusDiv.innerHTML = `
-          <div style="padding:10px;background:rgba(63,185,80,0.1);border:1px solid #3fb950;border-radius:6px;display:flex;align-items:center;gap:10px;">
-            <span style="font-size:18px;">🔒</span>
-            <div>
-              <strong style="color:#3fb950">Cryptographic Integrity Verified</strong>
-              <div style="font-size:12px;color:var(--text);margin-top:2px;">All ${data.blocks_verified} ledger blocks intact from genesis hash. Zero tampering detected.</div>
-            </div>
-          </div>
-        `;
-      } else {
-        statusDiv.innerHTML = `<div style="color:var(--danger)">Audit verification failed: ${data.message}</div>`;
-      }
-    } catch (err) {
-      statusDiv.innerHTML = `<div style="color:var(--danger)">Verification error: ${err.message}</div>`;
-    }
-  }
-
-  // Global helper for single row click
-  window.uploadSingleHold = async function(id) {
-    alert(`Uploading single tracking parcel for hold ${id} to PayPal Orders API...`);
-    await triggerBatchUpload();
-  };
-
-  // --- Boot Initialization ---
-  document.addEventListener('DOMContentLoaded', () => {
-    initTabs();
-    loadSummary();
-    loadWaterfall();
-    loadWhyHeld();
-
-    // Event listeners
-    document.getElementById('btnSync').addEventListener('click', async () => {
-      await loadSummary();
-      await loadWaterfall();
-      await loadWhyHeld();
-      alert('Synced with PayPal Sandbox ledger!');
+Seller Protection: Eligible`;
+  function initGuardGrid() {
+    return makeGrid('guard', $('gridGuard'), {
+      columnDefs: [
+        { field: 'at', headerName: 'Checked', width: 110 },
+        { field: 'verdict', headerName: 'Verdict', width: 190, cellRenderer: (p) => chip(p.value, /BLOCK|SCAM|DO NOT/i.test(p.value) ? 'bad' : 'good') },
+        { field: 'txn', headerName: 'Transaction', width: 210 },
+        { field: 'amount', headerName: 'Amount', width: 110 },
+        { field: 'summary', headerName: 'What we found', flex: 1, minWidth: 260, wrapText: true, autoHeight: true },
+        { field: 'flags', headerName: 'Red flags', flex: 1, minWidth: 240, wrapText: true, autoHeight: true }
+      ],
+      rowData: [], overlayNoRowsTemplate: 'No emails checked yet'
     });
-
-    const zapierBtn = document.getElementById('btnZapierPing');
-    if (zapierBtn) {
-      zapierBtn.addEventListener('click', async () => {
-        zapierBtn.disabled = true;
-        zapierBtn.textContent = 'Pinging...';
-        try {
-          const res = await fetch('/api/lowcode/zapier/trigger', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              event: 'manual.ui_ping',
-              data: {
-                triggered_by: 'Merchant Dashboard UI',
-                timestamp: new Date().toISOString(),
-                status: 'operational',
-                total_held: document.getElementById('kpiHeld')?.textContent || '$5,235.24'
-              }
-            })
-          });
-          const data = await res.json();
-          if (data.success) {
-            alert(`⚡ Zapier Webhook Ping Succeeded!\n\nStatus: HTTP ${data.status}\nWebhook: ${data.webhook_url}\nEvent: ${data.event}\nTimestamp: ${data.dispatched_at}\n\nCheck your Zapier Zap history to see the triggered action!`);
-          } else {
-            alert(`Zapier dispatch result: ${data.error || 'Failed'}`);
-          }
-        } catch (err) {
-          alert('Zapier ping failed: ' + err.message);
-        } finally {
-          zapierBtn.disabled = false;
-          zapierBtn.textContent = '⚡ Ping Zapier';
-        }
+  }
+  $('btnLoadScam').addEventListener('click', () => { $('emailInput').value = scamEmail; });
+  $('btnLoadReal').addEventListener('click', () => { $('emailInput').value = realEmail; });
+  $('btnVerifyEmail').addEventListener('click', async () => {
+    const rawEmail = $('emailInput').value.trim();
+    if (!rawEmail) return setStatus('guardStatus', 'Paste an email first.', 'bad');
+    initGuardGrid();
+    setStatus('guardStatus', 'Reading the email and checking the payment with PayPal…');
+    try {
+      const d = await post('/api/payment-guard/verify-email', { rawEmail });
+      const blocked = d.verification_status === 'PHISHING_SCAM_BLOCKED' || d.can_ship === false;
+      grids.guard.applyTransaction({
+        add: [{
+          at: new Date().toLocaleTimeString(),
+          verdict: blocked ? 'DO NOT SHIP' : 'Verified payment',
+          txn: d.transaction_id || '—',
+          amount: d.actual_amount != null ? money(d.actual_amount) : d.claimed_amount != null ? money(d.claimed_amount) : '—',
+          summary: d.summary || '',
+          flags: (d.red_flags || []).join(' · ')
+        }],
+        addIndex: 0
       });
+      setStatus('guardStatus', blocked ? 'Blocked: do not ship against this email.' : 'This payment is real in PayPal.', blocked ? 'bad' : 'good');
+      refreshAudit();
+    } catch (e) {
+      setStatus('guardStatus', e.message, 'bad');
     }
-
-    document.getElementById('btnToggleWaterfall').addEventListener('click', () => {
-      currentWaterfallMode = currentWaterfallMode === 'now' ? 'plan' : 'now';
-      document.getElementById('btnToggleWaterfall').textContent = currentWaterfallMode === 'now' 
-        ? 'Toggle Scenario: Show If Tracking Uploaded'
-        : 'Toggle Scenario: Show Expected Now';
-      renderWaterfall();
-    });
-
-    document.getElementById('btnUploadBatch').addEventListener('click', triggerBatchUpload);
-    document.getElementById('btnRunMatcher').addEventListener('click', loadMatcher);
-
-    document.getElementById('goalDays').addEventListener('input', (e) => {
-      document.getElementById('lblGoalDays').textContent = e.target.value;
-    });
-    document.getElementById('btnSimulateGoal').addEventListener('click', simulateCashGoal);
-
-    document.getElementById('btnLoadScamEmail').addEventListener('click', () => {
-      document.getElementById('txtEmailInput').value = sampleScamEmail;
-    });
-    document.getElementById('btnLoadAuthenticEmail').addEventListener('click', () => {
-      document.getElementById('txtEmailInput').value = sampleAuthenticEmail;
-    });
-    document.getElementById('btnVerifyEmail').addEventListener('click', verifyEmail);
-
-    document.getElementById('btnCheckInjection').addEventListener('click', checkInjection);
-    document.getElementById('btnRunA2A').addEventListener('click', runA2A);
-    document.getElementById('btnVerifyAudit').addEventListener('click', verifyAuditChain);
   });
 
-})();
+  // ================= Disputes =================
+  async function loadDisputes() {
+    const { disputes } = await api('/api/disputes');
+    const g = makeGrid('disputes', $('gridDisputes'), {
+      columnDefs: [
+        { field: 'dispute_id', headerName: 'Dispute', width: 160, cellRenderer: 'agGroupCellRenderer' },
+        { field: 'order_id', headerName: 'Order', width: 140 },
+        { field: 'amount', headerName: 'Amount', width: 110, valueFormatter: (p) => money(p.value) },
+        { field: 'reason', headerName: 'Reason', width: 190 },
+        { field: 'status', headerName: 'Status', width: 240, cellRenderer: (p) => chip(p.value, /RESOLVED/.test(p.value) ? 'good' : /REVIEW/.test(p.value) ? 'bad' : 'warn') },
+        { field: 'buyer_message', headerName: 'Buyer said', flex: 1, minWidth: 240, wrapText: true, autoHeight: true },
+        { field: 'respond_by', headerName: 'Respond by', width: 130, valueFormatter: (p) => day(p.value) }
+      ],
+      rowData: disputes, masterDetail: true, detailRowAutoHeight: true,
+      isRowMaster: (d) => Boolean(d && d.transcript && d.transcript.length),
+      detailCellRendererParams: {
+        detailGridOptions: {
+          theme,
+          columnDefs: [
+            { field: 'turn_number', headerName: 'Turn', width: 80 },
+            { field: 'who', headerName: 'From', width: 170 },
+            { field: 'message', headerName: 'Message', flex: 1, wrapText: true, autoHeight: true },
+            { field: 'attached', headerName: 'Attached', width: 280 }
+          ],
+          domLayout: 'autoHeight'
+        },
+        getDetailRowData: (p) => p.successCallback(p.data.transcript)
+      }
+    });
+    g.setGridOption('rowData', disputes);
+    setStatus('disputeStatus', `${disputes.length} open dispute${disputes.length === 1 ? '' : 's'}`);
+  }
+  $('btnRunA2A').addEventListener('click', async () => {
+    const g = grids.disputes;
+    const target = (g && g.getSelectedRows()[0]) || (g && g.getDisplayedRowAtIndex(0)?.data);
+    if (!target) return setStatus('disputeStatus', 'No dispute to settle.', 'bad');
+    setStatus('disputeStatus', 'Buyer agent and Unhold agent are negotiating…');
+    try {
+      const d = await post(`/api/disputes/${encodeURIComponent(target.dispute_id)}/negotiate`, { options: { maxTurns: 4, autoOfferCoupon: true } });
+      const transcript = (d.turns || []).map((t) => ({
+        turn_number: t.turn_number,
+        who: t.sender === 'BUYER_AGENT' ? 'Buyer agent' : 'Unhold merchant agent',
+        message: t.message,
+        attached: t.evidence_attached ? `SD-JWT proof (${t.evidence_attached.type})` : t.offer ? `Store credit $${t.offer.amount_usd} (${t.offer.coupon_code})` : ''
+      }));
+      const { disputes } = await api('/api/disputes');
+      g.setGridOption('rowData', disputes.map((x) => (x.dispute_id === target.dispute_id ? { ...x, transcript } : x)));
+      g.forEachNode((n) => n.data.dispute_id === target.dispute_id && n.setExpanded(true));
+      setStatus('disputeStatus', `Settlement ${d.final_status || d.status || 'finished'} after ${transcript.length} turns.`, 'good');
+      refreshAudit();
+    } catch (e) {
+      setStatus('disputeStatus', e.message, 'bad');
+    }
+  });
+  $('btnCheckInjection').addEventListener('click', async () => {
+    setStatus('disputeStatus', 'Scanning…');
+    try {
+      const d = await post('/api/prompt-guard/check', { message: $('injectionInput').value });
+      const score = d.riskScore ?? d.risk_score ?? 0;
+      const hit = d.isInjected || d.is_injection || score > 0.4;
+      setStatus('disputeStatus', hit ? `Blocked: prompt injection (risk ${Math.round(score * 100)}%). Payout commands neutralised.` : 'Clean buyer message.', hit ? 'bad' : 'good');
+    } catch (e) {
+      setStatus('disputeStatus', e.message, 'bad');
+    }
+  });
+
+  // ================= Audit chain =================
+  async function loadAudit() {
+    const { chain } = await api('/api/audit');
+    const rows = (chain || []).slice().reverse();
+    const g = makeGrid('audit', $('gridAudit'), {
+      columnDefs: [
+        { field: 'block_id', headerName: '#', width: 80 },
+        { field: 'timestamp', headerName: 'When', width: 170, valueFormatter: (p) => new Date(p.value).toLocaleString() },
+        { field: 'actor', headerName: 'Who', width: 210, filter: 'agSetColumnFilter' },
+        { field: 'action', headerName: 'Action', width: 260, filter: 'agSetColumnFilter' },
+        { field: 'target', headerName: 'On', width: 180 },
+        { field: 'result', headerName: 'Result', width: 110, cellRenderer: (p) => chip(p.value, /error|fail/i.test(p.value) ? 'bad' : /simulated/i.test(p.value) ? 'warn' : 'good') },
+        { field: 'detail', headerName: 'Detail', flex: 1, minWidth: 260, wrapText: true, autoHeight: true },
+        { field: 'hash', headerName: 'Hash', width: 190, valueFormatter: (p) => p.value.slice(0, 20) + '…', tooltipField: 'hash' }
+      ],
+      defaultColDef: { sortable: true, resizable: true, filter: true },
+      rowData: rows, tooltipShowDelay: 300
+    });
+    g.setGridOption('rowData', rows);
+  }
+  async function refreshAudit() {
+    if (!grids.audit) return;
+    const { chain } = await api('/api/audit');
+    grids.audit.setGridOption('rowData', (chain || []).slice().reverse());
+  }
+  $('btnVerifyAudit').addEventListener('click', async () => {
+    setStatus('auditStatus', 'Re-hashing every block from genesis…');
+    try {
+      const d = await post('/api/audit/verify');
+      setStatus('auditStatus', d.valid ? `Chain intact${d.blocks_verified ? ` — ${d.blocks_verified} blocks` : ''}. No tampering.` : `Chain broken: ${d.error || d.message || 'hash mismatch'}`, d.valid ? 'good' : 'bad');
+    } catch (e) {
+      setStatus('auditStatus', e.message, 'bad');
+    }
+  });
+
+  // ---------- boot ----------
+  await loadCockpit();
+})().catch((e) => {
+  console.error(e);
+  document.body.insertAdjacentHTML('afterbegin', `<pre style="color:#f85149;padding:12px">Cockpit failed to start: ${e.message}</pre>`);
+});

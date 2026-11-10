@@ -569,7 +569,7 @@ HTML_CONTENT = """<!doctype html>
             <tr>
               <td><strong>3. Design & Real-World Usability</strong></td>
               <td>
-                Enterprise merchant cockpit powered by local AG Grid Community 34.3.1 with multi-column sorting, quick search, 
+                Enterprise merchant cockpit powered by local AG Grid Enterprise 34.3.1 + AG Charts Enterprise 12.3.1 with multi-column sorting, quick search, 
                 interactive Hold Waterfall schedule, risk tags, and real-time Monte Carlo cash projections.
               </td>
               <td><code>public/index.html</code> (Dashboard at <code>/</code>)</td>
@@ -1511,7 +1511,7 @@ Content-Type: application/json
             <tr>
               <td><strong>AG Grid</strong></td>
               <td>Community 34.3.1 high-density holds grid with custom sorting, filters, and chips</td>
-              <td><code>public/ag-grid-community.min.js</code> &bull; <code>public/app.js</code></td>
+              <td><code>public/vendor/ag-grid-enterprise.min.js</code> &bull; <code>public/app.js</code></td>
             </tr>
             <tr>
               <td><strong>Zapier</strong></td>

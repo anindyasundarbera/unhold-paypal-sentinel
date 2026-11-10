@@ -27,6 +27,8 @@ import {
   queryAstropodsGateway,
   type ZapierEventPayload
 } from './engine/lowcode_dispatcher.js';
+import { buildGridQuery, type GridColumnSpec } from './engine/grid_query.js';
+import { llmConfigured } from './engine/llm.js';
 import type { CarrierManifestRecord, DisputeRecord } from './types/ledger.js';
 import type { WebhookVerificationRequest } from './types/paypal.js';
 
@@ -130,6 +132,48 @@ export async function createServer(customDb?: LedgerDB, customPayPal?: PayPalCli
     });
 
   // --- Health Check for Render ---
+  // --- UI config (AG Grid Enterprise licence + feature flags) ---
+  // An AG Grid licence key is a front-end key by design; it is served here so it is not committed.
+  fastify.get('/api/config', async () => ({
+    agGridLicenseKey: process.env.AG_GRID_API_KEY || null,
+    llm: llmConfigured(),
+    paypalEnvironment: process.env.PAYPAL_ENVIRONMENT || 'sandbox',
+    simulatedHistory: true,
+    simulateUploads: process.env.UNHOLD_SIMULATE_UPLOADS === 'true',
+    integrations: {
+      zapier: Boolean(process.env.ZAPIER_WEBHOOK_URL),
+      astropods: Boolean(process.env.ASTROPODS_API_KEY),
+      elastic: Boolean(process.env.ELASTIC_URL && process.env.ELASTIC_API_KEY),
+      kernel: Boolean(process.env.KERNEL_API_KEY),
+      channel3: Boolean(process.env.CHANNEL3_API_KEY),
+      postman: Boolean(process.env.POSTMAN_API_KEY)
+    }
+  }));
+
+  // --- "Ask the grid": plain English -> AG Grid filter/sort/group state ---
+  fastify.post('/api/ai/grid-query', async (req, reply) => {
+    const body = (req.body || {}) as { question?: string; columns?: GridColumnSpec[] };
+    if (!body.question || !Array.isArray(body.columns) || body.columns.length === 0) {
+      return reply.status(400).send({ error: 'question and columns are required' });
+    }
+    if (!llmConfigured()) {
+      return reply.status(503).send({ error: 'LLM is not configured on the server.' });
+    }
+    try {
+      const result = await buildGridQuery(body.question, body.columns.slice(0, 40));
+      await db.appendAuditEntry({
+        actor: 'Ask the grid (LLM)',
+        action: 'grid_query',
+        target: 'holds grid',
+        result: 'ok',
+        detail: `"${body.question.slice(0, 120)}" -> ${result.explanation}`
+      });
+      return result;
+    } catch (err) {
+      return reply.status(502).send({ error: `Could not turn that into a grid query: ${(err as Error).message}` });
+    }
+  });
+
   fastify.get('/health', async () => {
     return {
       status: 'ok',
