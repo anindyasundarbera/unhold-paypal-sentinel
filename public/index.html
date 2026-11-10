@@ -94,6 +94,11 @@
         <button class="btn" id="btnClearFilters">Clear</button>
         <button class="btn primary" id="btnUploadSelected">Upload tracking for selected</button>
       </div>
+      <div class="bar">
+        <input type="text" id="searchInput" class="grow" placeholder="Search the ledger with Elastic, e.g. “which payment is about brass candles”" aria-label="Search the ledger">
+        <button class="btn" id="btnSearch">Search ledger</button>
+      </div>
+      <div id="gridSearch" class="grid" style="display:none;height:230px"></div>
       <div class="status" id="holdsStatus"></div>
       <div id="gridHolds" class="grid h-grow"></div>
     </section>

@@ -231,9 +231,9 @@
           columnDefs: [{ field: 'field', headerName: 'Detail', width: 190 }, { field: 'value', headerName: '', flex: 1, wrapText: true, autoHeight: true }],
           domLayout: 'autoHeight'
         },
-        getDetailRowData: (params) => {
+        getDetailRowData: async (params) => {
           const h = params.data;
-          params.successCallback([
+          const rows = [
             { field: 'Why held', value: h.reason },
             { field: 'Release rule', value: h.rule },
             { field: 'PayPal transaction', value: h.txn_id },
@@ -241,7 +241,23 @@
             { field: 'Shipped', value: h.shipped_at || '—' },
             { field: 'Delivered', value: h.delivered_at || '—' },
             { field: 'Tracking uploaded', value: h.uploaded ? 'yes' : 'no' }
-          ]);
+          ];
+          if (cfg.integrations?.channel3) {
+            try {
+              const p = await api(`/api/holds/${encodeURIComponent(h.id)}/product`);
+              if (p.found) {
+                rows.push({ field: 'Catalog match (Channel3)', value: `${p.title} · ${p.brand || 'unknown brand'} · ${p.category || ''}` });
+                if (p.price) rows.push({ field: 'Catalog price', value: `${money(p.price)} at ${p.retailer}` });
+                if (p.priceCheck) rows.push({ field: 'Price check', value: `${p.priceCheck.verdict.replace('_', ' ')} — ${p.priceCheck.note}` });
+                if (p.url) rows.push({ field: 'Product page', value: p.url });
+              } else {
+                rows.push({ field: 'Catalog match (Channel3)', value: 'No catalog match for this item name.' });
+              }
+            } catch (e) {
+              rows.push({ field: 'Catalog match (Channel3)', value: `Lookup failed: ${e.message}` });
+            }
+          }
+          params.successCallback(rows);
         }
       },
       onGridReady: () => {}
@@ -315,6 +331,38 @@
     const rows = grids.holds ? grids.holds.getSelectedRows() : [];
     uploadOrders(rows.filter((r) => r.status === 'seller_has').map((r) => r.order_id), 'holdsStatus');
   });
+
+  // ---- Elastic search over the ledger ----
+  async function ledgerSearch() {
+    const q = $('searchInput').value.trim();
+    if (!q) return;
+    $('btnSearch').disabled = true;
+    setStatus('holdsStatus', 'Searching with Elastic…');
+    try {
+      const r = await api('/api/search?q=' + encodeURIComponent(q));
+      $('gridSearch').style.display = 'block';
+      const g = makeGrid('search', $('gridSearch'), {
+        columnDefs: [
+          { field: 'kind', headerName: 'Type', width: 110, cellRenderer: (p) => chip(p.value, p.value === 'hold' ? 'info' : p.value === 'audit' ? 'mute' : 'warn') },
+          { field: 'title', headerName: 'Match', flex: 1, minWidth: 260 },
+          { field: 'ref', headerName: 'Reference', width: 190 },
+          { field: 'status', headerName: 'State', width: 130 },
+          { field: 'amount', headerName: 'Amount', width: 110, valueFormatter: (p) => (p.value == null ? '' : money(p.value)) },
+          { field: 'score', headerName: 'Relevance', width: 110, sort: 'desc' }
+        ],
+        defaultColDef: { sortable: true, resizable: true },
+        rowData: r.hits
+      });
+      g.setGridOption('rowData', r.hits);
+      setStatus('holdsStatus', `${r.total} matches in ${r.took} ms (Elastic semantic + keyword search)`, 'good');
+    } catch (e) {
+      setStatus('holdsStatus', e.message, 'bad');
+    } finally {
+      $('btnSearch').disabled = false;
+    }
+  }
+  $('btnSearch').addEventListener('click', ledgerSearch);
+  $('searchInput').addEventListener('keydown', (e) => e.key === 'Enter' && ledgerSearch());
 
   // ================= Tracking matcher =================
   async function loadMatcher() {

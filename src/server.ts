@@ -31,6 +31,8 @@ import { ingestManifests } from './engine/manifest_ingest.js';
 import { timingSafeEqual } from 'node:crypto';
 import { buildGridQuery, type GridColumnSpec } from './engine/grid_query.js';
 import { llmConfigured } from './engine/llm.js';
+import * as elastic from './search/elastic.js';
+import { channel3Configured, lookupProduct } from './engine/product_lookup.js';
 import type { CarrierManifestRecord, DisputeRecord } from './types/ledger.js';
 import type { WebhookVerificationRequest } from './types/paypal.js';
 
@@ -151,6 +153,45 @@ export async function createServer(customDb?: LedgerDB, customPayPal?: PayPalCli
       postman: Boolean(process.env.POSTMAN_API_KEY)
     }
   }));
+
+  // --- Elastic: semantic + keyword search over the ledger ---
+  fastify.get('/api/search', async (req, reply) => {
+    const q = String((req.query as { q?: string; kind?: string }).q || '').trim();
+    const kind = (req.query as { kind?: string }).kind;
+    if (!q) return reply.status(400).send({ error: 'q is required' });
+    if (!elastic.elasticConfigured()) return reply.status(503).send({ error: 'Elastic is not configured on the server.' });
+    try {
+      return await elastic.search(q.slice(0, 300), 15, kind);
+    } catch (err) {
+      return reply.status(502).send({ error: (err as Error).message });
+    }
+  });
+  fastify.post('/api/search/reindex', async (_req, reply) => {
+    if (!elastic.elasticConfigured()) return reply.status(503).send({ error: 'Elastic is not configured on the server.' });
+    try {
+      const r = await elastic.reindex(db);
+      await db.appendAuditEntry({ actor: 'Elastic indexer', action: 'reindex', target: 'unhold-ledger', result: 'ok', detail: `indexed ${r.indexed} documents in ${r.ms} ms` });
+      return r;
+    } catch (err) {
+      return reply.status(502).send({ error: (err as Error).message });
+    }
+  });
+  // Index in the background at start-up so search works without a manual step.
+  if (!customDb && elastic.elasticConfigured()) {
+    elastic.reindex(db).then((r) => console.log(`[ELASTIC] indexed ${r.indexed} documents in ${r.ms} ms`)).catch((e) => console.warn(`[ELASTIC] start-up index failed: ${e.message}`));
+  }
+
+  // --- Channel3: product-graph evidence for a held order ---
+  fastify.get('/api/holds/:id/product', async (req, reply) => {
+    if (!channel3Configured()) return reply.status(503).send({ error: 'Channel3 is not configured on the server.' });
+    const hold = await db.getHoldById((req.params as { id: string }).id);
+    if (!hold) return reply.status(404).send({ error: 'Hold not found.' });
+    try {
+      return await lookupProduct(hold.item, hold.amount);
+    } catch (err) {
+      return reply.status(502).send({ error: (err as Error).message });
+    }
+  });
 
   // --- "Ask the grid": plain English -> AG Grid filter/sort/group state ---
   fastify.post('/api/ai/grid-query', async (req, reply) => {
