@@ -214,12 +214,9 @@ export class LedgerDB {
     return db;
   }
 
-  /** Throwaway in-memory Postgres (pg-mem). Tests only; never touches Supabase. */
-  static async memory(): Promise<LedgerDB> {
-    const { newDb } = await import('pg-mem');
-    const mem = newDb();
-    const { Pool } = mem.adapters.createPg();
-    const db = new LedgerDB(new Pool() as unknown as PoolLike, 'in-memory-test');
+  /** Wrap an existing pool (used by the test helper with an in-memory Postgres). Creates the schema. */
+  static async fromPool(pool: PoolLike, backend: 'supabase-postgres' | 'in-memory-test' = 'in-memory-test'): Promise<LedgerDB> {
+    const db = new LedgerDB(pool, backend);
     await db.pool.query(SCHEMA_SQL);
     return db;
   }

@@ -2,6 +2,7 @@ import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from '../src/server.js';
 import { LedgerDB } from '../src/db/ledger_db.js';
+import { memoryLedger } from './helpers/memory_ledger.js';
 import {
   dispatchZapierEvent,
   getAstropodsPodSpec,
@@ -10,7 +11,7 @@ import {
 
 describe('Step 6 & 7: Static UI Wireframes & Low-Code Integrations', async () => {
   test('Fastify serves static wireframes at root /, /cockpit, and /deck', async () => {
-    const db = await LedgerDB.memory();
+    const db = await memoryLedger();
     const server = await createServer(db);
 
     // Root GET /
@@ -93,7 +94,7 @@ describe('Step 6 & 7: Static UI Wireframes & Low-Code Integrations', async () =>
   });
 
   test('Fastify Low-Code REST endpoints return valid responses', async () => {
-    const db = await LedgerDB.memory();
+    const db = await memoryLedger();
     const server = await createServer(db);
 
     // GET /api/lowcode/astropods/spec

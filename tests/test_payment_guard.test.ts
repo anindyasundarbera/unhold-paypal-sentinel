@@ -1,6 +1,7 @@
 import { test, describe, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { LedgerDB } from '../src/db/ledger_db.js';
+import { memoryLedger } from './helpers/memory_ledger.js';
 import { seedLedger } from '../src/seed/seeder.js';
 import { PayPalClient } from '../src/paypal/client.js';
 import {
@@ -19,7 +20,7 @@ describe('Step 5: Payment Guard (Anti-Scam & Pre-Flight)', async () => {
   let paypal: PayPalClient;
 
   before(async () => {
-    db = await LedgerDB.memory();
+    db = await memoryLedger();
     await seedLedger(db);
     paypal = new PayPalClient({
       clientId: 'sandbox_client',
@@ -286,7 +287,7 @@ describe('Step 5: Payment Guard (Anti-Scam & Pre-Flight)', async () => {
     let testDb: LedgerDB;
 
     before(async () => {
-      testDb = await LedgerDB.memory();
+      testDb = await memoryLedger();
       await seedLedger(testDb);
       server = await createServer(testDb);
     });

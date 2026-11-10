@@ -1,6 +1,7 @@
 import { test, describe, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { LedgerDB } from '../src/db/ledger_db.js';
+import { memoryLedger } from './helpers/memory_ledger.js';
 import { seedLedger } from '../src/seed/seeder.js';
 import { analyzePromptInjection, sanitizeUntrustedMessage } from '../src/engine/prompt_guard.js';
 import {
@@ -174,7 +175,7 @@ describe('Step 4: Buyer Assurance & A2A SD-JWT Settlement Engine', async () => {
     let db: LedgerDB;
 
     before(async () => {
-      db = await LedgerDB.memory();
+      db = await memoryLedger();
       await seedLedger(db);
     });
 
@@ -278,7 +279,7 @@ describe('Step 4: Buyer Assurance & A2A SD-JWT Settlement Engine', async () => {
     let db: LedgerDB;
 
     before(async () => {
-      db = await LedgerDB.memory();
+      db = await memoryLedger();
       await seedLedger(db);
       server = await createServer(db);
     });

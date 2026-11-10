@@ -1,11 +1,12 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import { LedgerDB } from '../src/db/ledger_db.js';
+import { memoryLedger } from './helpers/memory_ledger.js';
 import { seedLedger } from '../src/seed/seeder.js';
 
 describe('Unhold SQLite Ledger & Seeder', async () => {
   test('initializes and seeds 106 holds accurately', async () => {
-    const db = await LedgerDB.memory();
+    const db = await memoryLedger();
     const counts = await seedLedger(db);
 
     assert.equal(counts.holdsCount, 106);
@@ -24,7 +25,7 @@ describe('Unhold SQLite Ledger & Seeder', async () => {
   });
 
   test('retrieves speedable holds and updates tracking status', async () => {
-    const db = await LedgerDB.memory();
+    const db = await memoryLedger();
     await seedLedger(db);
 
     const speedable = await db.getSpeedableHolds();
@@ -58,7 +59,7 @@ describe('Unhold SQLite Ledger & Seeder', async () => {
   });
 
   test('verifies initial ledger audit chain integrity', async () => {
-    const db = await LedgerDB.memory();
+    const db = await memoryLedger();
     await seedLedger(db);
 
     const auditChain = await db.getAuditChain();

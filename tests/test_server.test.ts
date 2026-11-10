@@ -2,6 +2,7 @@ import { test, describe, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from '../src/server.js';
 import { LedgerDB } from '../src/db/ledger_db.js';
+import { memoryLedger } from './helpers/memory_ledger.js';
 import type { FastifyInstance } from 'fastify';
 
 describe('Render Fastify Web Service Endpoints', async () => {
@@ -10,7 +11,7 @@ describe('Render Fastify Web Service Endpoints', async () => {
 
   before(async () => {
     process.env.NODE_ENV = 'test';
-    db = await LedgerDB.memory();
+    db = await memoryLedger();
     server = await createServer(db);
   });
 

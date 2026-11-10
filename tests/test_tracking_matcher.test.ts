@@ -1,6 +1,7 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import { LedgerDB } from '../src/db/ledger_db.js';
+import { memoryLedger } from './helpers/memory_ledger.js';
 import { seedLedger } from '../src/seed/seeder.js';
 import { PayPalClient } from '../src/paypal/client.js';
 import {
@@ -35,7 +36,7 @@ describe('Step 3: AI Tracking Matcher & Batch Uploader', async () => {
   });
 
   test('Tier 1: Exact ID matching', async () => {
-    const db = await LedgerDB.memory();
+    const db = await memoryLedger();
     await seedLedger(db);
     const speedable = await db.getSpeedableHolds();
     const targetHold = speedable[0];
@@ -153,7 +154,7 @@ describe('Step 3: AI Tracking Matcher & Batch Uploader', async () => {
   });
 
   test('batch matching matches all 38 manifests with $1,869.39 potential acceleration', async () => {
-    const db = await LedgerDB.memory();
+    const db = await memoryLedger();
     await seedLedger(db);
     const manifests = await db.getAllManifests();
     const holds = await db.getAllHolds();
@@ -170,7 +171,7 @@ describe('Step 3: AI Tracking Matcher & Batch Uploader', async () => {
   });
 
   test('executes batch tracking upload, re-dates holds, updates health score to 73, and audits chain', async () => {
-    const db = await LedgerDB.memory();
+    const db = await memoryLedger();
     await seedLedger(db);
 
     const paypal = new PayPalClient({
@@ -233,7 +234,7 @@ describe('Step 3: AI Tracking Matcher & Batch Uploader', async () => {
 
   test('Fastify server endpoints POST /api/manifests/match and POST /api/manifests/upload', async () => {
     process.env.NODE_ENV = 'test';
-    const db = await LedgerDB.memory();
+    const db = await memoryLedger();
     await seedLedger(db);
     const server = await createServer(db);
 

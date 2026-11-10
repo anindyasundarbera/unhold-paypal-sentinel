@@ -1,6 +1,7 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import { LedgerDB } from '../src/db/ledger_db.js';
+import { memoryLedger } from './helpers/memory_ledger.js';
 import { seedLedger, loadSeedData } from '../src/seed/seeder.js';
 import {
   analyzeSalesSurge,
@@ -14,7 +15,7 @@ import {
 import { buildHoldWaterfall } from '../src/engine/waterfall.js';
 
 describe('Step 2: Cash-Flow Engine & Monte Carlo Forecaster', async () => {
-  const db = await LedgerDB.memory();
+  const db = await memoryLedger();
   await seedLedger(db);
   const seedData = loadSeedData();
   const holds = await db.getAllHolds();
