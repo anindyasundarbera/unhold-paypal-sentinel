@@ -27,6 +27,8 @@ import {
   queryAstropodsGateway,
   type ZapierEventPayload
 } from './engine/lowcode_dispatcher.js';
+import { ingestManifests } from './engine/manifest_ingest.js';
+import { timingSafeEqual } from 'node:crypto';
 import { buildGridQuery, type GridColumnSpec } from './engine/grid_query.js';
 import { llmConfigured } from './engine/llm.js';
 import type { CarrierManifestRecord, DisputeRecord } from './types/ledger.js';
@@ -242,6 +244,21 @@ export async function createServer(customDb?: LedgerDB, customPayPal?: PayPalCli
     const manifests = body.manifests || (await db.getAllManifests());
     const holds = await db.getAllHolds();
     return matchAllManifests(manifests, holds);
+  });
+
+  // Inbound low-code door: Zapier posts parcel rows here (shared-secret header).
+  fastify.post('/api/manifests/ingest', async (req, reply) => {
+    const secret = process.env.INGEST_SHARED_SECRET;
+    if (!secret) return reply.status(503).send({ error: 'Ingest is disabled: INGEST_SHARED_SECRET is not set.' });
+    const sent = String(req.headers['x-unhold-secret'] || '');
+    const a = Buffer.from(sent);
+    const b = Buffer.from(secret);
+    if (a.length !== b.length || !timingSafeEqual(a, b)) {
+      return reply.status(401).send({ error: 'Invalid or missing x-unhold-secret header.' });
+    }
+    const report = await ingestManifests(db, req.body);
+    if (report.stored === 0) return reply.status(400).send({ error: 'No valid parcel rows in the request.', ...report });
+    return report;
   });
 
   fastify.post('/api/manifests/upload', async (req) => {
