@@ -6,6 +6,7 @@
 [![Quality Gates](https://img.shields.io/badge/quality%20gates-G0..G8%20verified-blue)](#)
 [![RFC 9901](https://img.shields.io/badge/RFC%209901-SD--JWT%20ES256-purple)](#)
 [![PayPal APIs](https://img.shields.io/badge/PayPal-Orders%20v2%20%7C%20Captures%20%7C%20Disputes-003087)](#)
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/anindyasundarbera/unhold-paypal-sentinel)
 
 ---
 
@@ -83,13 +84,55 @@
 
 ---
 
-## 3. Deployment Modes (Dual-Engine Architecture)
+## 3. Deploying to Render (Cloud Production)
 
-Unhold runs in two seamless environments:
-1. **Local Mode (Zero Credentials / Offline):**  
-   Uses Node 24 native `node:sqlite` in-memory or on disk. Pre-seeded with 106 realistic merchant holds ($5,235.24). Allows offline judge testing without external accounts.
-2. **Cloud Mode (Render Managed Production):**  
-   Deployed via `render.yaml` to Render Web Services + Managed PostgreSQL. Exposes public HTTPS port 443 for real PayPal Sandbox webhooks.
+Unhold is fully prepared for immediate deployment to **Render.com** (utilizing the Render Starter tier, $50 hackathon credit, or Free tier):
+
+### Method A: 1-Click Render Blueprint Deployment (Recommended)
+
+1. Click the **Deploy to Render** button below:  
+   [![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/anindyasundarbera/unhold-paypal-sentinel)
+2. Render will automatically parse [`render.yaml`](render.yaml) and configure:
+   - **`unhold-api`**: Web Service running Fastify on port 10000 with `/health` check.
+   - **`unhold-reconcile-sweep`**: Cron job running every 6 hours (`0 */6 * * *`) executing the automated ledger reconciliation sweep.
+   - **`unhold-postgres`**: Managed PostgreSQL database instance (optional).
+3. Under Environment Variables, input your credentials (or leave defaults for offline demonstration):
+   - `PAYPAL_CLIENT_ID` & `PAYPAL_CLIENT_SECRET`: Your PayPal Sandbox credentials from [developer.paypal.com](https://developer.paypal.com/dashboard).
+   - `ZAPIER_WEBHOOK_URL`: Your Zapier Catch Hook URL to receive real-time Slack cards.
+   - `ASTROPODS_API_KEY`: Your Astropods AI Gateway API key.
+4. Click **Apply**. Render will clone, build TypeScript, and launch the service with a public HTTPS URL (e.g. `https://unhold-api.onrender.com`).
+
+---
+
+### Method B: Manual Web Service Deployment on Render
+
+If you prefer deploying a standalone Web Service (Free or Starter tier):
+
+1. Go to your [Render Dashboard](https://dashboard.render.com/) and click **New + ➔ Web Service**.
+2. Connect the public repository: `https://github.com/anindyasundarbera/unhold-paypal-sentinel`.
+3. Configure the settings:
+   - **Name:** `unhold-paypal-sentinel`
+   - **Region:** `Oregon (US West)` or your preferred region
+   - **Branch:** `main`
+   - **Runtime:** `Node` (Node.js >= 22.5.0 detected via `.node-version`)
+   - **Build Command:** `npm install && npm run build`
+   - **Start Command:** `npm start`
+   - **Plan:** `Free` or `Starter`
+4. Under **Advanced ➔ Health Check Path**, set:
+   - `/health`
+5. Under **Environment Variables**, add:
+   ```env
+   NODE_ENV=production
+   PORT=10000
+   HOST=0.0.0.0
+   DATABASE_PATH=./data/unhold.db
+   PAYPAL_ENVIRONMENT=sandbox
+   ```
+6. Click **Create Web Service**. Once deployed:
+   - Dashboard: `https://<your-service>.onrender.com/`
+   - Technical Docs: `https://<your-service>.onrender.com/doc`
+   - 14-Slide Deck: `https://<your-service>.onrender.com/deck`
+   - Health Check: `https://<your-service>.onrender.com/health`
 
 ---
 

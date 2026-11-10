@@ -33,7 +33,13 @@ for (const p of candidateEnvPaths) {
 async function runSweep() {
   console.log(`[RENDER WORKFLOW] Starting Unhold Periodic Reconciliation Sweep at ${new Date().toISOString()}...`);
 
-  const db = new LedgerDB(process.env.DATABASE_PATH || ':memory:');
+  let db: LedgerDB;
+  try {
+    db = new LedgerDB(process.env.DATABASE_PATH || './data/unhold.db');
+  } catch (err) {
+    console.warn('[SWEEP] Database open failed at target path, falling back to :memory::', err);
+    db = new LedgerDB(':memory:');
+  }
   const clientId = process.env.PAYPAL_CLIENT_ID;
   const clientSecret = process.env.PAYPAL_CLIENT_SECRET;
 

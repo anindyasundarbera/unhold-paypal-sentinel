@@ -110,12 +110,22 @@ export async function createServer(customDb?: LedgerDB, customPayPal?: PayPalCli
     }
   );
 
-  const rawDbPath = process.env.DATABASE_PATH || ':memory:';
+  const rawDbPath = process.env.DATABASE_PATH || './data/unhold.db';
   let dbPath = rawDbPath;
   if (dbPath !== ':memory:' && !isAbsolute(dbPath)) {
     dbPath = resolve(join(__dirname, '..'), rawDbPath);
   }
-  const db = customDb || new LedgerDB(dbPath);
+  let db: LedgerDB;
+  if (customDb) {
+    db = customDb;
+  } else {
+    try {
+      db = new LedgerDB(dbPath);
+    } catch (err) {
+      console.warn(`[WARN] Failed to open database at ${dbPath}, falling back to local ./data/unhold.db:`, err);
+      db = new LedgerDB(resolve(join(__dirname, '..'), './data/unhold.db'));
+    }
+  }
   // Seed the ledger if empty
   if (db.getAllHolds().length === 0) {
     seedLedger(db);

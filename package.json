@@ -5,6 +5,9 @@
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "engines": {
+    "node": ">=22.5.0"
+  },
   "scripts": {
     "start": "node dist/server.js",
     "sweep": "node dist/cron/reconcile_sweep.js",

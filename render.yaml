@@ -14,6 +14,8 @@ services:
     healthCheckPath: /health
     autoDeploy: true
     envVars:
+      - key: NODE_VERSION
+        value: 22.12.0
       - key: NODE_ENV
         value: production
       - key: PORT
@@ -49,6 +51,8 @@ services:
     buildCommand: npm install && npm run build
     startCommand: npm run sweep
     envVars:
+      - key: NODE_VERSION
+        value: 22.12.0
       - key: NODE_ENV
         value: production
       - key: PAYPAL_ENVIRONMENT
