@@ -10,12 +10,14 @@ services:
     plan: starter
     region: oregon
     buildCommand: npm install && npm run build
-    startCommand: npm run start
+    startCommand: node --experimental-sqlite dist/server.js
     healthCheckPath: /health
     autoDeploy: true
     envVars:
       - key: NODE_VERSION
-        value: 22.12.0
+        value: 22.14.0
+      - key: NODE_OPTIONS
+        value: --experimental-sqlite
       - key: NODE_ENV
         value: production
       - key: PORT

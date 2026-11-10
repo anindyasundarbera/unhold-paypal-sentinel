@@ -9,8 +9,8 @@
     "node": ">=22.5.0"
   },
   "scripts": {
-    "start": "node dist/server.js",
-    "sweep": "node dist/cron/reconcile_sweep.js",
+    "start": "node --experimental-sqlite dist/server.js",
+    "sweep": "node --experimental-sqlite dist/cron/reconcile_sweep.js",
     "render:diagnose": "tsx scripts/render_cli.ts",
     "build": "tsc && cp src/seed/unhold_seed.json dist/seed/",
     "test": "tsx --test tests/*.test.ts",
