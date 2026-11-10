@@ -100,11 +100,11 @@ function getCarrierSource(carrier: string | null): string {
   return 'fedex_dhl_pickups.csv';
 }
 
-export function seedLedger(db: LedgerDB): {
+export async function seedLedger(db: LedgerDB): Promise<{
   holdsCount: number;
   evidenceCount: number;
   manifestsCount: number;
-} {
+}> {
   const data = loadSeedData();
 
   // 1. Seed Holds
@@ -132,7 +132,7 @@ export function seedLedger(db: LedgerDB): {
       item: raw.item as string,
       uploaded: Boolean(raw.uploaded)
     };
-    db.insertHold(hold);
+    await db.insertHold(hold);
   }
 
   // 2. Seed Evidence
@@ -144,14 +144,14 @@ export function seedLedger(db: LedgerDB): {
       amount: Number(raw.amount),
       ref: (raw.ref as string) || null
     };
-    db.insertEvidence(ev);
+    await db.insertEvidence(ev);
   }
 
   // 3. Synthesize and Seed Carrier Manifests (from seller_has untracked holds)
-  const speedable = db.getSpeedableHolds().sort((a, b) => (a.id < b.id ? -1 : 1));
+  const speedable = (await db.getSpeedableHolds()).sort((a, b) => (a.id < b.id ? -1 : 1));
   let manifestsCount = 0;
 
-  speedable.forEach((h, i) => {
+  for (const [i, h] of speedable.entries()) {
     const name = fullName(h.buyer);
     const parts = name.split(' ');
     const first = parts[0];
@@ -220,12 +220,12 @@ export function seedLedger(db: LedgerDB): {
       decision
     };
 
-    db.insertManifest(manifestRecord);
+    await db.insertManifest(manifestRecord);
     manifestsCount++;
-  });
+  }
 
   // 4. Seed Initial Audit Entries
-  db.appendAuditEntry({
+  await db.appendAuditEntry({
     actor: 'System',
     action: 'sync_transactions',
     target: 'Transaction Search, 2 windows',
@@ -233,7 +233,7 @@ export function seedLedger(db: LedgerDB): {
     detail: 'sandbox rows plus simulated hold history'
   });
 
-  db.appendAuditEntry({
+  await db.appendAuditEntry({
     actor: 'System',
     action: 'get_balances',
     target: 'USD',
@@ -241,7 +241,7 @@ export function seedLedger(db: LedgerDB): {
     detail: 'withheld 0.00 in sandbox'
   });
 
-  db.appendAuditEntry({
+  await db.appendAuditEntry({
     actor: 'Engine',
     action: 'reconcile_ledger',
     target: 'USD',
@@ -250,8 +250,8 @@ export function seedLedger(db: LedgerDB): {
   });
 
   // 5. Seed Initial Demo Dispute for A2A Negotiation
-  if (!db.getDispute('DISP-SEED-001')) {
-    db.insertDispute({
+  if (!(await db.getDispute('DISP-SEED-001'))) {
+    await db.insertDispute({
       dispute_id: 'DISP-SEED-001',
       order_id: 'ORD-789012',
       capture_id: 'CAP-789012',

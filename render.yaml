@@ -10,14 +10,12 @@ services:
     plan: starter
     region: oregon
     buildCommand: npm install && npm run build
-    startCommand: node --experimental-sqlite dist/server.js
+    startCommand: node dist/server.js
     healthCheckPath: /health
     autoDeploy: true
     envVars:
       - key: NODE_VERSION
         value: 22.14.0
-      - key: NODE_OPTIONS
-        value: --experimental-sqlite
       - key: NODE_ENV
         value: production
       - key: PORT
@@ -32,16 +30,12 @@ services:
         sync: false
       - key: PAYPAL_WEBHOOK_ID
         sync: false
-      - key: DATABASE_PATH
-        value: /var/data/unhold.db
+      - key: DATABASE_URL
+        sync: false # Supabase Postgres connection string: the only ledger store, shared by API, cron and agents
       - key: ASTROPODS_API_KEY
         sync: false
       - key: ZAPIER_WEBHOOK_URL
         sync: false
-    disk:
-      name: unhold-data
-      mountPath: /var/data
-      sizeGB: 1
 
   # 2. Automated 6-Hour Reconciliation Sweep (Render Cron Service)
   - type: cron
@@ -65,13 +59,6 @@ services:
         sync: false
       - key: PAYPAL_WEBHOOK_ID
         sync: false
-      - key: DATABASE_PATH
-        value: /var/data/unhold.db
+      - key: DATABASE_URL
+        sync: false
 
-# 3. Optional Managed Relational Database
-databases:
-  - name: unhold-postgres
-    plan: starter
-    databaseName: unhold_ledger
-    user: unhold_admin
-    region: oregon

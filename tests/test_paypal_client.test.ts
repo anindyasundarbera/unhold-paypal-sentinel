@@ -2,7 +2,7 @@ import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import { PayPalClient } from '../src/paypal/client.js';
 
-describe('PayPal REST Client Contract', () => {
+describe('PayPal REST Client Contract', async () => {
   test('authenticates and caches OAuth2 token', async () => {
     let callCount = 0;
     const mockFetch: typeof fetch = async (url, init) => {

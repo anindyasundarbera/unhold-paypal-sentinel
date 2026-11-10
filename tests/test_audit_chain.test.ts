@@ -8,8 +8,8 @@ import {
 } from '../src/audit/audit_chain.js';
 import type { AuditEntry } from '../src/types/ledger.js';
 
-describe('Audit Chain SHA-256 Tamper Detection', () => {
-  test('creates a valid sequential chain of 3 blocks', () => {
+describe('Audit Chain SHA-256 Tamper Detection', async () => {
+  test('creates a valid sequential chain of 3 blocks', async () => {
     const block1 = createAuditEntry({
       blockId: 1,
       actor: 'System',
@@ -47,7 +47,7 @@ describe('Audit Chain SHA-256 Tamper Detection', () => {
     assert.equal(result.valid, true);
   });
 
-  test('detects content tampering in an existing block', () => {
+  test('detects content tampering in an existing block', async () => {
     const block1 = createAuditEntry({
       blockId: 1,
       actor: 'System',
@@ -80,7 +80,7 @@ describe('Audit Chain SHA-256 Tamper Detection', () => {
     assert.match(result.error || '', /Payload tampering detected at block 2/);
   });
 
-  test('detects link break when a tampered block is re-hashed', () => {
+  test('detects link break when a tampered block is re-hashed', async () => {
     const block1 = createAuditEntry({
       blockId: 1,
       actor: 'System',

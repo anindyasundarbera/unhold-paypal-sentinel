@@ -4,19 +4,19 @@ import { createServer } from '../src/server.js';
 import { LedgerDB } from '../src/db/ledger_db.js';
 import type { FastifyInstance } from 'fastify';
 
-describe('Render Fastify Web Service Endpoints', () => {
+describe('Render Fastify Web Service Endpoints', async () => {
   let server: FastifyInstance;
   let db: LedgerDB;
 
   before(async () => {
     process.env.NODE_ENV = 'test';
-    db = new LedgerDB(':memory:');
+    db = await LedgerDB.memory();
     server = await createServer(db);
   });
 
   after(async () => {
     await server.close();
-    db.close();
+    await db.close();
   });
 
   test('GET /health returns 200 with service identification', async () => {

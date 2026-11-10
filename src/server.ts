@@ -3,7 +3,7 @@ import cors from '@fastify/cors';
 import fastifyStatic from '@fastify/static';
 import { readFileSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { dirname, join, resolve, isAbsolute } from 'node:path';
+import { dirname, join } from 'node:path';
 import { LedgerDB } from './db/ledger_db.js';
 import { seedLedger } from './seed/seeder.js';
 import { PayPalClient } from './paypal/client.js';
@@ -110,25 +110,10 @@ export async function createServer(customDb?: LedgerDB, customPayPal?: PayPalCli
     }
   );
 
-  const rawDbPath = process.env.DATABASE_PATH || './data/unhold.db';
-  let dbPath = rawDbPath;
-  if (dbPath !== ':memory:' && !isAbsolute(dbPath)) {
-    dbPath = resolve(join(__dirname, '..'), rawDbPath);
-  }
-  let db: LedgerDB;
-  if (customDb) {
-    db = customDb;
-  } else {
-    try {
-      db = new LedgerDB(dbPath);
-    } catch (err) {
-      console.warn(`[WARN] Failed to open database at ${dbPath}, falling back to local ./data/unhold.db:`, err);
-      db = new LedgerDB(resolve(join(__dirname, '..'), './data/unhold.db'));
-    }
-  }
-  // Seed the ledger if empty
-  if (db.getAllHolds().length === 0) {
-    seedLedger(db);
+  // Supabase Postgres is the only ledger store (DATABASE_URL). Tests inject an in-memory Postgres.
+  const db: LedgerDB = customDb ?? (await LedgerDB.connect());
+  if ((await db.getAllHolds()).length === 0) {
+    await seedLedger(db);
   }
 
   const clientId = process.env.PAYPAL_CLIENT_ID || 'sandbox_client_id';
@@ -150,6 +135,7 @@ export async function createServer(customDb?: LedgerDB, customPayPal?: PayPalCli
       status: 'ok',
       service: 'unhold-api',
       environment: process.env.NODE_ENV || 'development',
+      ledger: db.backend,
       timestamp: new Date().toISOString()
     };
   });
@@ -157,25 +143,25 @@ export async function createServer(customDb?: LedgerDB, customPayPal?: PayPalCli
   // --- Ledger & Analytics Endpoints ---
 
   fastify.get('/api/summary', async () => {
-    return db.getSummary();
+    return await db.getSummary();
   });
 
   fastify.get('/api/holds', async (req) => {
     const query = req.query as { status?: string };
     return {
-      holds: db.getAllHolds(query.status)
+      holds: await db.getAllHolds(query.status)
     };
   });
 
   fastify.get('/api/waterfall', async (req) => {
     const query = req.query as { asOf?: string };
-    const holds = db.getAllHolds();
+    const holds = await db.getAllHolds();
     return buildHoldWaterfall(holds, query.asOf || '2026-11-09T18:00:00Z');
   });
 
   fastify.get('/api/why-held', async () => {
-    const holds = db.getAllHolds();
-    const evidence = db.getAllEvidence();
+    const holds = await db.getAllHolds();
+    const evidence = await db.getAllEvidence();
     // Default sales history from seed
     const seedPath = join(__dirname, 'seed/unhold_seed.json');
     let sales: Array<{ d: string; v: number }> = [];
@@ -192,7 +178,7 @@ export async function createServer(customDb?: LedgerDB, customPayPal?: PayPalCli
       goalDay?: number;
       confidence?: number;
     };
-    const holds = db.getAllHolds();
+    const holds = await db.getAllHolds();
     return planCashGoal(
       holds,
       body.goalAmount || 4500,
@@ -203,14 +189,14 @@ export async function createServer(customDb?: LedgerDB, customPayPal?: PayPalCli
 
   fastify.get('/api/manifests', async () => {
     return {
-      manifests: db.getAllManifests()
+      manifests: await db.getAllManifests()
     };
   });
 
   fastify.post('/api/manifests/match', async (req) => {
     const body = (req.body as { manifests?: CarrierManifestRecord[] }) || {};
-    const manifests = body.manifests || db.getAllManifests();
-    const holds = db.getAllHolds();
+    const manifests = body.manifests || (await db.getAllManifests());
+    const holds = await db.getAllHolds();
     return matchAllManifests(manifests, holds);
   });
 
@@ -223,13 +209,13 @@ export async function createServer(customDb?: LedgerDB, customPayPal?: PayPalCli
 
   fastify.get('/api/disputes', async () => {
     return {
-      disputes: db.getAllDisputes()
+      disputes: await db.getAllDisputes()
     };
   });
 
   fastify.post('/api/disputes/ingest', async (req) => {
     const dispute = req.body as DisputeRecord;
-    db.insertDispute(dispute);
+    await db.insertDispute(dispute);
     return {
       status: 'INGESTED',
       dispute_id: dispute.dispute_id
@@ -239,7 +225,7 @@ export async function createServer(customDb?: LedgerDB, customPayPal?: PayPalCli
   fastify.post('/api/disputes/:id/negotiate', async (req, reply) => {
     const params = req.params as { id: string };
     const body = (req.body as { options?: SettlementOptions }) || {};
-    let dispute = db.getDispute(params.id);
+    let dispute = await db.getDispute(params.id);
     if (!dispute) {
       if (params.id === 'DISP-SEED-001' || params.id.startsWith('DISP-') || params.id.startsWith('PP-D-')) {
         const demoDispute: DisputeRecord = {
@@ -254,7 +240,7 @@ export async function createServer(customDb?: LedgerDB, customPayPal?: PayPalCli
           respond_by: new Date(Date.now() + 864000000).toISOString(),
           created_at: new Date().toISOString()
         };
-        db.insertDispute(demoDispute);
+        await db.insertDispute(demoDispute);
         dispute = demoDispute;
       } else {
         return reply.status(404).send({ error: `Dispute ${params.id} not found` });
@@ -297,12 +283,12 @@ export async function createServer(customDb?: LedgerDB, customPayPal?: PayPalCli
 
   fastify.post('/api/payment-guard/preflight', async (req) => {
     const body = req.body as PreFlightAuditParams;
-    return auditPreFlightSellerProtection(body, db);
+    return await auditPreFlightSellerProtection(body, db);
   });
 
   fastify.get('/api/audit', async () => {
-    const chain = db.getAuditChain();
-    const verification = db.verifyLedgerAuditChain();
+    const chain = await db.getAuditChain();
+    const verification = await db.verifyLedgerAuditChain();
     return {
       chain,
       verification
@@ -310,7 +296,7 @@ export async function createServer(customDb?: LedgerDB, customPayPal?: PayPalCli
   });
 
   fastify.post('/api/audit/verify', async () => {
-    return db.verifyLedgerAuditChain();
+    return await db.verifyLedgerAuditChain();
   });
 
   // --- Low-Code Sponsor Integrations (Zapier & Astropods) ---
@@ -410,7 +396,7 @@ export async function createServer(customDb?: LedgerDB, customPayPal?: PayPalCli
       actionResult = 'dispute_opened';
       detail = `Dispute ${disputeId} opened for $${amountVal} (${reason}); funds placed on hold`;
 
-      db.insertDispute({
+      await db.insertDispute({
         dispute_id: disputeId,
         order_id: orderId,
         capture_id: captureId,
@@ -425,7 +411,7 @@ export async function createServer(customDb?: LedgerDB, customPayPal?: PayPalCli
     }
 
     // Append to tamper-evident audit chain
-    const auditEntry = db.appendAuditEntry({
+    const auditEntry = await db.appendAuditEntry({
       actor: 'PayPal Webhook Gateway',
       action: eventType,
       target: eventId,

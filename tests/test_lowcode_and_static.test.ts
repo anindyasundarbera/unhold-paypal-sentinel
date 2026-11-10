@@ -8,9 +8,9 @@ import {
   queryAstropodsGateway
 } from '../src/engine/lowcode_dispatcher.js';
 
-describe('Step 6 & 7: Static UI Wireframes & Low-Code Integrations', () => {
+describe('Step 6 & 7: Static UI Wireframes & Low-Code Integrations', async () => {
   test('Fastify serves static wireframes at root /, /cockpit, and /deck', async () => {
-    const db = new LedgerDB(':memory:');
+    const db = await LedgerDB.memory();
     const server = await createServer(db);
 
     // Root GET /
@@ -93,7 +93,7 @@ describe('Step 6 & 7: Static UI Wireframes & Low-Code Integrations', () => {
   });
 
   test('Fastify Low-Code REST endpoints return valid responses', async () => {
-    const db = new LedgerDB(':memory:');
+    const db = await LedgerDB.memory();
     const server = await createServer(db);
 
     // GET /api/lowcode/astropods/spec

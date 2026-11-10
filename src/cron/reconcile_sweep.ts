@@ -33,13 +33,8 @@ for (const p of candidateEnvPaths) {
 async function runSweep() {
   console.log(`[RENDER WORKFLOW] Starting Unhold Periodic Reconciliation Sweep at ${new Date().toISOString()}...`);
 
-  let db: LedgerDB;
-  try {
-    db = new LedgerDB(process.env.DATABASE_PATH || './data/unhold.db');
-  } catch (err) {
-    console.warn('[SWEEP] Database open failed at target path, falling back to :memory::', err);
-    db = new LedgerDB(':memory:');
-  }
+  const db = await LedgerDB.connect();
+  console.log('[SWEEP] Connected to Supabase ledger.');
   const clientId = process.env.PAYPAL_CLIENT_ID;
   const clientSecret = process.env.PAYPAL_CLIENT_SECRET;
 
@@ -76,7 +71,7 @@ async function runSweep() {
   }
 
   // Record reconciliation entry in audit chain
-  const entry = db.appendAuditEntry({
+  const entry = await db.appendAuditEntry({
     actor: 'Render Workflow (Sweep)',
     action: 'reconcile_sweep',
     target: 'Transaction Search & Ledger',
@@ -86,7 +81,7 @@ async function runSweep() {
 
   console.log(`[SWEEP] Appended audit block #${entry.block_id} (Hash: ${entry.hash.slice(0, 16)}...)`);
   console.log(`[RENDER WORKFLOW] Sweep finished successfully.`);
-  db.close();
+  await db.close();
 }
 
 runSweep().catch((err) => {

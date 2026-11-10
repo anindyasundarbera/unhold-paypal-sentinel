@@ -283,7 +283,7 @@ export async function verifyPaymentAuthenticity(
 
     let auditEntry: { block_id: number; hash: string } | undefined;
     if (ledger) {
-      const entry = ledger.appendAuditEntry({
+      const entry = await ledger.appendAuditEntry({
         actor: 'Payment Guard (Anti-Scam)',
         action: 'BLOCK_PHISHING_ATTEMPT',
         target: txnId,
@@ -328,7 +328,7 @@ export async function verifyPaymentAuthenticity(
   // Authentic Payment Verified
   let auditEntry: { block_id: number; hash: string } | undefined;
   if (ledger) {
-    const entry = ledger.appendAuditEntry({
+    const entry = await ledger.appendAuditEntry({
       actor: 'Payment Guard (Authenticity)',
       action: 'VERIFY_PAYMENT',
       target: txnId,
@@ -357,10 +357,10 @@ export async function verifyPaymentAuthenticity(
  * Audits Pre-Flight Seller Protection compliance prior to label printing or dispatch.
  * Enforces PayPal's $750 Signature Confirmation rule and confirms checkout address alignment.
  */
-export function auditPreFlightSellerProtection(
+export async function auditPreFlightSellerProtection(
   params: PreFlightAuditParams,
   ledger?: LedgerDB
-): PreFlightAuditReport {
+): Promise<PreFlightAuditReport> {
   const checklist: PreFlightChecklistItem[] = [];
   const riskFactors: string[] = [];
   const requiredShippingActions: string[] = [];
@@ -462,7 +462,7 @@ export function auditPreFlightSellerProtection(
 
   let auditEntry: { block_id: number; hash: string } | undefined;
   if (ledger) {
-    const entry = ledger.appendAuditEntry({
+    const entry = await ledger.appendAuditEntry({
       actor: 'Payment Guard (Pre-Flight Auditor)',
       action: 'PREFLIGHT_AUDIT',
       target: params.order_id,

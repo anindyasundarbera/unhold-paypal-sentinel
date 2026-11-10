@@ -13,14 +13,14 @@ import {
 } from '../src/engine/monte_carlo.js';
 import { buildHoldWaterfall } from '../src/engine/waterfall.js';
 
-describe('Step 2: Cash-Flow Engine & Monte Carlo Forecaster', () => {
-  const db = new LedgerDB(':memory:');
-  seedLedger(db);
+describe('Step 2: Cash-Flow Engine & Monte Carlo Forecaster', async () => {
+  const db = await LedgerDB.memory();
+  await seedLedger(db);
   const seedData = loadSeedData();
-  const holds = db.getAllHolds();
-  const evidence = db.getAllEvidence();
+  const holds = await db.getAllHolds();
+  const evidence = await db.getAllEvidence();
 
-  test('calculates sales surge and account health score accurately', () => {
+  test('calculates sales surge and account health score accurately', async () => {
     const surge = analyzeSalesSurge(seedData.sales);
     assert.equal(surge.spikeRatio, 2.85); // 2.9x surge
     assert.equal(surge.last7Gross, 3968.41);
@@ -34,7 +34,7 @@ describe('Step 2: Cash-Flow Engine & Monte Carlo Forecaster', () => {
     assert.deepEqual(penalties, [15, 20, 12]);
   });
 
-  test('synthesizes grounded Why-Held diagnostic report with citations', () => {
+  test('synthesizes grounded Why-Held diagnostic report with citations', async () => {
     const report = generateWhyHeldReport(holds, seedData.sales, evidence);
 
     assert.equal(report.total_held_usd, 5235.24);
@@ -50,7 +50,7 @@ describe('Step 2: Cash-Flow Engine & Monte Carlo Forecaster', () => {
     assert.ok(report.cited_evidence_ids.length >= 2);
   });
 
-  test('runs deterministic Monte Carlo simulation and verifies monotonic curves', () => {
+  test('runs deterministic Monte Carlo simulation and verifies monotonic curves', async () => {
     const sim = simulateCashReleases(holds, {}, '2026-11-09T18:00:00Z');
 
     assert.equal(sim.horizonDays, 21);
@@ -79,7 +79,7 @@ describe('Step 2: Cash-Flow Engine & Monte Carlo Forecaster', () => {
     }
   });
 
-  test('verifies cash goal planning probability jump with tracking and shipping actions', () => {
+  test('verifies cash goal planning probability jump with tracking and shipping actions', async () => {
     const goalAmount = 4500;
     const goalDay = 11; // Nov 20, 2026
 
@@ -107,7 +107,7 @@ describe('Step 2: Cash-Flow Engine & Monte Carlo Forecaster', () => {
     assert.ok(plan.plannedProb > plan.baselineProb);
   });
 
-  test('aggregates Hold Waterfall and demonstrates cash release acceleration', () => {
+  test('aggregates Hold Waterfall and demonstrates cash release acceleration', async () => {
     const waterfall = buildHoldWaterfall(holds, '2026-11-09T18:00:00Z');
 
     assert.equal(waterfall.totalHeldUsd, 5235.24);

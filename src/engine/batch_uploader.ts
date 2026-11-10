@@ -55,8 +55,8 @@ export async function executeBatchTrackingUpload(
   const maxBatch = options.maxBatch ?? Infinity;
   const dayMs = 86400000;
 
-  const summaryBefore = ledger.getSummary();
-  const allManifests = ledger.getAllManifests();
+  const summaryBefore = await ledger.getSummary();
+  const allManifests = await ledger.getAllManifests();
 
   // Filter candidates
   let candidates = allManifests.filter((m) => {
@@ -79,7 +79,7 @@ export async function executeBatchTrackingUpload(
 
   for (const manifest of candidates) {
     const orderId = manifest.matched_order_id!;
-    const hold = ledger.getHoldByOrderId(orderId);
+    const hold = await ledger.getHoldByOrderId(orderId);
 
     if (!hold) {
       items.push({
@@ -164,7 +164,7 @@ export async function executeBatchTrackingUpload(
 
       // Update SQLite Ledger with new tracking and expedited wi_date
       const expeditedDate = hold.wi_date || hold.exp_at;
-      ledger.updateHoldTracking(
+      await ledger.updateHoldTracking(
         hold.id,
         manifest.tracking_number,
         manifest.carrier,
@@ -173,7 +173,7 @@ export async function executeBatchTrackingUpload(
       );
 
       // Append tamper-evident audit entry
-      const auditEntry = ledger.appendAuditEntry({
+      const auditEntry = await ledger.appendAuditEntry({
         actor: 'Batch Tracking Uploader',
         action: 'POST /v2/checkout/orders/{id}/track',
         target: hold.order_id,
@@ -216,7 +216,7 @@ export async function executeBatchTrackingUpload(
     }
   }
 
-  const summaryAfter = ledger.getSummary();
+  const summaryAfter = await ledger.getSummary();
   const avgDaysSaved = totalUploaded > 0 ? Number((totalDaysSavedSum / totalUploaded).toFixed(1)) : 0;
 
   if (totalUploaded > 0 && process.env.ZAPIER_WEBHOOK_URL) {

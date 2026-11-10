@@ -21,8 +21,7 @@ RUN npm ci --omit=dev
 COPY --from=builder /app/dist ./dist
 COPY public/ ./public/
 
-# Create persistent data directory
-RUN mkdir -p /var/data ./data && chown -R node:node /var/data ./data /app
+RUN chown -R node:node /app
 
 USER node
 EXPOSE 10000

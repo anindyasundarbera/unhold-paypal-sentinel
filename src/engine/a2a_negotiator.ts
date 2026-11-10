@@ -90,7 +90,7 @@ export async function runAutonomousDisputeSettlement(
 
   if (!guard.actionAllowed) {
     // Attack detected: Escalate to human, refuse autonomous concession
-    const alertEntry = ledger.appendAuditEntry({
+    const alertEntry = await ledger.appendAuditEntry({
       actor: 'Prompt Injection Defense Shield',
       action: 'SECURITY_ALERT',
       target: dispute.dispute_id,
@@ -98,7 +98,7 @@ export async function runAutonomousDisputeSettlement(
       detail: `Prompt injection attack blocked (${guard.riskLevel} risk). Matched: ${guard.matchedPatterns.join(', ')}`
     });
 
-    ledger.updateDisputeStatus(dispute.dispute_id, 'UNDER_HUMAN_SECURITY_REVIEW');
+    await ledger.updateDisputeStatus(dispute.dispute_id, 'UNDER_HUMAN_SECURITY_REVIEW');
 
     return {
       session_id: sessionId,
@@ -145,7 +145,7 @@ export async function runAutonomousDisputeSettlement(
   // ---------------------------------------------------------
   // Phase 3: Evidence Presentation via RFC 9901 SD-JWT (Turn 2)
   // ---------------------------------------------------------
-  const hold = ledger.getHoldByOrderId(dispute.order_id);
+  const hold = await ledger.getHoldByOrderId(dispute.order_id);
   const carrier = hold?.carrier || 'UPS';
   const trackingNumber = hold?.tracking_number || '1Z9999999999999999';
   const deliveredAt = hold?.delivered_at || hold?.wi_date || '2026-11-08T18:00:00Z';
@@ -227,10 +227,10 @@ export async function runAutonomousDisputeSettlement(
   };
 
   // Update Dispute Status in Ledger
-  ledger.updateDisputeStatus(dispute.dispute_id, 'RESOLVED', sdJwtResult.sdJwt);
+  await ledger.updateDisputeStatus(dispute.dispute_id, 'RESOLVED', sdJwtResult.sdJwt);
 
   // Append Audit Record
-  const auditEntry = ledger.appendAuditEntry({
+  const auditEntry = await ledger.appendAuditEntry({
     actor: 'A2A Buyer Assurance Agent',
     action: 'SETTLE_DISPUTE',
     target: dispute.dispute_id,
