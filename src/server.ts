@@ -23,7 +23,7 @@ import {
 } from './engine/payment_guard.js';
 import {
   dispatchZapierEvent,
-  getAstropodsPodSpec,
+  getAstropodsBlueprint,
   queryAstropodsGateway,
   type ZapierEventPayload
 } from './engine/lowcode_dispatcher.js';
@@ -624,7 +624,7 @@ ${hold ? `<p>${esc(hold.carrier || '')} Â· shipped ${esc((hold.shipped_at || 'â€
   });
 
   fastify.get('/api/lowcode/astropods/spec', async () => {
-    return getAstropodsPodSpec();
+    return getAstropodsBlueprint();
   });
 
   fastify.post('/api/lowcode/astropods/query', async (req) => {

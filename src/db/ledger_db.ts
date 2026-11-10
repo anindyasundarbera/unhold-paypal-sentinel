@@ -265,7 +265,16 @@ export class LedgerDB {
   ) {}
 
   /** Connect to Supabase Postgres (DATABASE_URL) and make sure the schema exists. */
-  static async connect(connectionString: string | undefined = process.env.DATABASE_URL): Promise<LedgerDB> {
+  /** DATABASE_URL, or the POSTGRES_* variables Astropods injects for a bound knowledge store. */
+  static connectionStringFromEnv(env: NodeJS.ProcessEnv = process.env): string | undefined {
+    if (env.DATABASE_URL) return env.DATABASE_URL;
+    if (env.POSTGRES_HOST && env.POSTGRES_USER && env.POSTGRES_PASSWORD) {
+      return `postgresql://${encodeURIComponent(env.POSTGRES_USER)}:${encodeURIComponent(env.POSTGRES_PASSWORD)}@${env.POSTGRES_HOST}:${env.POSTGRES_PORT || '5432'}/${env.POSTGRES_DB || 'postgres'}`;
+    }
+    return undefined;
+  }
+
+  static async connect(connectionString: string | undefined = LedgerDB.connectionStringFromEnv()): Promise<LedgerDB> {
     if (!connectionString || !/^postgres(ql)?:\/\//.test(connectionString)) {
       throw new Error(
         'DATABASE_URL is not set. Unhold stores its ledger in Supabase Postgres; set DATABASE_URL to the Supabase connection string.'

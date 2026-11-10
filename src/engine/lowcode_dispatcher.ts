@@ -21,44 +21,6 @@ export interface ZapierDispatchResult {
   dispatched_at: string;
 }
 
-export interface AstropodsSpec {
-  version: string;
-  pod: {
-    id: string;
-    name: string;
-    description: string;
-    runtime: string;
-    port: number;
-    health_check: string;
-  };
-  team: {
-    agents: Array<{
-      id: string;
-      name: string;
-      role: string;
-      endpoint: string;
-    }>;
-  };
-  integrations: {
-    paypal: {
-      environment: string;
-      apis: string[];
-    };
-    zapier: {
-      webhook_enabled: boolean;
-      events: string[];
-    };
-    ag_grid: {
-      component: string;
-      license_type: string;
-    };
-    render: {
-      blueprint: string;
-      service_type: string;
-    };
-  };
-}
-
 /**
  * Dispatches an outbound webhook event to Zapier when configured.
  * Uses native fetch with timeout and error tolerance.
@@ -194,85 +156,23 @@ export async function dispatchZapierEvent(
 }
 
 /**
- * Returns the declarative Astropods Pod specification for Unhold.
+ * The real Astropods blueprint (astropods.yml, spec blueprint/v1) this service is packaged as.
+ * Served so a reviewer can see exactly what `ast blueprint push` publishes.
  */
-export function getAstropodsPodSpec(): AstropodsSpec {
-  return {
-    version: '1.0',
-    pod: {
-      id: 'unhold-paypal-sentinel',
-      name: 'Unhold Autonomous Cash-Flow & Payment Protection Pod',
-      description: 'Autonomous multi-agent system resolving PayPal seller holds, tracking uploads, and dispute defense',
-      runtime: 'nodejs-20',
-      port: Number(process.env.PORT || 10000),
-      health_check: '/health'
-    },
-    team: {
-      agents: [
-        {
-          id: 'agt-ledger-scribe',
-          name: 'Ledger Scribe',
-          role: 'Rebuilds and reconciles 106 PayPal holds using T2107/T2108 event code pairing',
-          endpoint: 'GET /api/holds'
-        },
-        {
-          id: 'agt-cashflow-strategist',
-          name: 'Cash-Flow Strategist',
-          role: 'Builds hold waterfall, 6-driver breakdown, and 2,000-run Monte Carlo forecaster',
-          endpoint: 'GET /api/waterfall'
-        },
-        {
-          id: 'agt-tracking-matcher',
-          name: 'AI Tracking Matcher',
-          role: '3-tier carrier manifest matching and idempotent PayPal tracking uploader',
-          endpoint: 'POST /api/manifests/upload'
-        },
-        {
-          id: 'agt-safe-to-ship',
-          name: 'Payment Guard Gatekeeper',
-          role: 'Inbound email phishing auditor and pre-flight Seller Protection verifier',
-          endpoint: 'POST /api/payment-guard/verify-email'
-        },
-        {
-          id: 'agt-dispute-negotiator',
-          name: 'Dispute Defense & A2A Negotiator',
-          role: 'Untrusted prompt injection defense and 4-turn RFC 9901 SD-JWT autonomous settlement',
-          endpoint: 'POST /api/disputes/{id}/negotiate'
-        },
-        {
-          id: 'agt-audit-officer',
-          name: 'Tamper-Evident Audit Officer',
-          role: 'Maintains SHA-256 cryptographic hash chain verifying all state transitions',
-          endpoint: 'GET /api/audit'
-        }
-      ]
-    },
-    integrations: {
-      paypal: {
-        environment: (process.env.PAYPAL_ENVIRONMENT as string) || 'sandbox',
-        apis: [
-          'POST /v2/checkout/orders/{id}/track',
-          'GET /v2/checkout/orders/{id}',
-          'GET /v2/payments/captures/{id}',
-          'GET /v1/reporting/transactions',
-          'GET /v1/reporting/balances',
-          'POST /v1/notifications/verify-webhook-signature'
-        ]
-      },
-      zapier: {
-        webhook_enabled: !!process.env.ZAPIER_WEBHOOK_URL,
-        events: ['tracking.batch_uploaded', 'dispute.settled', 'payment.fraud_detected']
-      },
-      ag_grid: {
-        component: 'AG Grid Enterprise 34.3.1 + AG Charts Enterprise 12.3.1',
-        license_type: 'enterprise-trial'
-      },
-      render: {
-        blueprint: 'render.yaml',
-        service_type: 'web'
-      }
+export function getAstropodsBlueprint(): { file: string; spec: string | null; name: string | null; yaml: string | null } {
+  const candidates = [join(__dirname, '../../astropods.yml'), join(process.cwd(), 'astropods.yml')];
+  for (const p of candidates) {
+    if (existsSync(p)) {
+      const yaml = readFileSync(p, 'utf8');
+      return {
+        file: 'astropods.yml',
+        spec: yaml.match(/^spec:\s*(\S+)/m)?.[1] ?? null,
+        name: yaml.match(/^name:\s*(\S+)/m)?.[1] ?? null,
+        yaml
+      };
     }
-  };
+  }
+  return { file: 'astropods.yml', spec: null, name: null, yaml: null };
 }
 
 /**
