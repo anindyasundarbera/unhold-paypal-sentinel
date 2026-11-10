@@ -3,3 +3,4 @@ dist/
 data/*.db
 data/*.db-journal
 .env
+.live_orders.json

@@ -15,6 +15,7 @@
     "build": "tsc && cp src/seed/unhold_seed.json dist/seed/",
     "test": "tsx --test tests/*.test.ts",
     "register-webhook": "tsx src/paypal/register_webhook.ts",
+    "seed:live": "tsx --env-file=.env scripts/seed_live_orders.ts",
     "dev": "tsx watch src/index.ts"
   },
   "keywords": [

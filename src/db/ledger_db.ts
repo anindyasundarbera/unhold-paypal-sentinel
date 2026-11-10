@@ -284,6 +284,14 @@ export class LedgerDB {
     );
   }
 
+  /** Point a seeded hold at a real PayPal sandbox order + capture (live demo orders). */
+  async relinkHold(holdId: string, orderId: string, captureId: string): Promise<boolean> {
+    return this.changed(
+      'UPDATE holds SET order_id = $1, txn_id = $2, updated_at = now() WHERE id = $3',
+      [orderId, captureId, holdId]
+    );
+  }
+
   async getHoldById(id: string): Promise<HoldRecord | null> {
     const rows = await this.rows('SELECT * FROM holds WHERE id = $1', [id]);
     return rows[0] ? mapHold(rows[0]) : null;
