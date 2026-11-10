@@ -33,6 +33,7 @@ import { buildGridQuery, type GridColumnSpec } from './engine/grid_query.js';
 import { llmConfigured } from './engine/llm.js';
 import * as elastic from './search/elastic.js';
 import { channel3Configured, lookupProduct } from './engine/product_lookup.js';
+import { checkCarrierStatus, kernelConfigured } from './engine/carrier_browser.js';
 import type { CarrierManifestRecord, DisputeRecord } from './types/ledger.js';
 import type { WebhookVerificationRequest } from './types/paypal.js';
 
@@ -188,6 +189,42 @@ export async function createServer(customDb?: LedgerDB, customPayPal?: PayPalCli
     if (!hold) return reply.status(404).send({ error: 'Hold not found.' });
     try {
       return await lookupProduct(hold.item, hold.amount);
+    } catch (err) {
+      return reply.status(502).send({ error: (err as Error).message });
+    }
+  });
+
+  // --- Demo carrier page: stands in for UPS/USPS/FedEx/DHL tracking pages (synthetic numbers are unknown to them) ---
+  fastify.get('/carrier/:trk', async (req, reply) => {
+    const trk = (req.params as { trk: string }).trk;
+    const hold = (await db.getAllHolds()).find((h) => h.tracking_number === trk);
+    const esc = (v: string) => v.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c] as string));
+    const status = !hold ? 'not_found' : hold.delivered_at ? 'delivered' : hold.shipped_at ? 'in_transit' : 'label_created';
+    const label = { not_found: 'Tracking number not found', delivered: 'Delivered', in_transit: 'In transit', label_created: 'Label created' }[status];
+    reply.type('text/html').send(`<!doctype html><html lang="en"><meta charset="utf-8"><title>Demo Carrier tracking ${esc(trk)}</title>
+<body style="font:16px system-ui;max-width:560px;margin:40px auto;padding:0 16px">
+<p style="color:#8a6d00;background:#fff8e1;padding:8px 12px;border-radius:6px">Demo carrier page. It stands in for the real carrier site, which does not know this synthetic tracking number.</p>
+<h1>Tracking ${esc(trk)}</h1>
+<p id="status" data-carrier-status="${status}" data-delivered-at="${esc(hold?.delivered_at || '')}"><strong>${label}</strong>${hold?.delivered_at ? ' on ' + esc(hold.delivered_at.slice(0, 10)) : ''}</p>
+${hold ? `<p>${esc(hold.carrier || '')} · shipped ${esc((hold.shipped_at || '—').slice(0, 10))}</p>` : ''}
+</body></html>`);
+  });
+
+  // --- Kernel: a cloud browser confirms delivery on the carrier page ---
+  fastify.post('/api/holds/:id/carrier-check', async (req, reply) => {
+    if (!kernelConfigured()) return reply.status(503).send({ error: 'Kernel is not configured on the server.' });
+    const hold = await db.getHoldById((req.params as { id: string }).id);
+    if (!hold) return reply.status(404).send({ error: 'Hold not found.' });
+    if (!hold.tracking_number) return reply.status(400).send({ error: 'This hold has no tracking number yet.' });
+    const baseUrl = process.env.PUBLIC_BASE_URL;
+    if (!baseUrl) return reply.status(503).send({ error: 'PUBLIC_BASE_URL is not set: Kernel needs a public URL to reach the carrier page.' });
+    try {
+      const r = await checkCarrierStatus(hold.tracking_number, baseUrl);
+      await db.appendAuditEntry({
+        actor: 'Kernel carrier check', action: 'carrier_status', target: hold.order_id, result: r.status || 'unknown',
+        detail: `Cloud browser session ${r.session_id} read ${r.url}: ${r.status}${r.delivered_at ? ' on ' + r.delivered_at.slice(0, 10) : ''} (${r.ms} ms)`
+      });
+      return r;
     } catch (err) {
       return reply.status(502).send({ error: (err as Error).message });
     }

@@ -364,6 +364,23 @@
   $('btnSearch').addEventListener('click', ledgerSearch);
   $('searchInput').addEventListener('keydown', (e) => e.key === 'Enter' && ledgerSearch());
 
+  $('btnVerifyDelivery').addEventListener('click', async () => {
+    const row = grids.holds && grids.holds.getSelectedRows()[0];
+    if (!row) return setStatus('holdsStatus', 'Select a hold with a tracking number first.', 'bad');
+    if (!row.tracking_number) return setStatus('holdsStatus', 'That hold has no tracking number yet.', 'bad');
+    $('btnVerifyDelivery').disabled = true;
+    setStatus('holdsStatus', 'A Kernel cloud browser is reading the carrier page…');
+    try {
+      const r = await post(`/api/holds/${encodeURIComponent(row.id)}/carrier-check`, {});
+      setStatus('holdsStatus', `Carrier says: ${String(r.status).replace('_', ' ')}${r.delivered_at ? ' on ' + r.delivered_at.slice(0, 10) : ''} (Kernel browser ${r.session_id.slice(0, 8)}…, ${r.ms} ms)`, r.status === 'delivered' ? 'good' : '');
+      refreshAudit();
+    } catch (e) {
+      setStatus('holdsStatus', e.message, 'bad');
+    } finally {
+      $('btnVerifyDelivery').disabled = false;
+    }
+  });
+
   // ================= Tracking matcher =================
   async function loadMatcher() {
     setStatus('matcherStatus', 'Matching carrier manifests to PayPal orders…');
