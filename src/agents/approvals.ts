@@ -51,7 +51,9 @@ export async function requestApproval(
   const data = {
     run_id: run.id, approval_id: id, title, summary,
     orders: plan.items.length, total_usd: plan.total_usd, avg_days_saved: plan.avg_days_sooner,
-    mode: plan.mode, approve_url, reject_url
+    mode: plan.mode, approve_url, reject_url,
+    // Opens the cockpit on the Owner's approvals, where the plan can be read parcel by parcel.
+    cockpit_url: `${base}/?role=owner#agents`
   };
 
   const hook = await dispatchZapierEvent({ event: 'agent.approval_requested', data });

@@ -46,6 +46,7 @@
       border-bottom: 2px solid transparent; white-space: nowrap; display: inline-flex; align-items: center; gap: 6px; }
     nav button:hover { color: var(--text); }
     nav button[aria-current="page"] { color: var(--text); border-bottom-color: var(--accent); font-weight: 600; }
+    nav button.more { font-size: 12px; }
     nav .sep { width: 1px; background: var(--line); margin: 10px 6px; flex: none; }
     .count { font-size: 11px; line-height: 16px; min-width: 18px; text-align: center; padding: 0 5px; border-radius: 999px; background: var(--raised); color: var(--muted); border: 1px solid var(--line); }
     .count.attn { background: var(--warn); color: #0d1117; border-color: var(--warn); font-weight: 700; }
@@ -105,6 +106,18 @@
     .next .txt b { display: block; font-size: 15px; }
     .next .txt span { color: var(--muted); }
 
+    .start { max-width: 980px; margin: 0 auto; width: 100%; display: flex; flex-direction: column; gap: var(--s4); padding-top: var(--s4); }
+    .start h1 { font-size: 24px; }
+    .roles { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: var(--s3); }
+    .role { text-align: left; background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 10px; padding: var(--s4); font: inherit; cursor: pointer;
+      display: flex; flex-direction: column; gap: 6px; min-height: 148px; }
+    .role:hover { border-color: var(--accent); }
+    .role[aria-current="true"] { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+    .role .top { display: flex; justify-content: space-between; align-items: center; gap: var(--s2); }
+    .role .name { font-size: 16px; font-weight: 700; }
+    .role .who { color: var(--muted); font-size: 13px; }
+    .role .live { margin-top: auto; font-weight: 600; }
+    .role .sub { color: var(--muted); font-size: 12px; }
     .view-error { display: none; padding: var(--s3) var(--s4); border: 1px solid rgba(248,81,73,.5); background: rgba(248,81,73,.08); border-radius: 8px; align-items: center; gap: var(--s3); flex-wrap: wrap; }
     .view-error.show { display: flex; }
     .view-error p { margin: 0; flex: 1; min-width: 200px; }
@@ -140,6 +153,7 @@
     <div class="head-right">
       <span class="chip info" id="envChip">PayPal sandbox</span>
       <span class="chip warn" title="The PayPal sandbox cannot create seller holds, so the hold history is seeded. Tracking uploads to real sandbox orders are real.">Simulated hold history</span>
+      <button class="btn small" id="btnRole" hidden></button>
       <span class="updated" id="updatedAt" aria-live="polite"></span>
       <button class="btn small" id="btnRefresh">Refresh</button>
       <details class="pop" id="integrations">
@@ -149,20 +163,7 @@
     </div>
   </header>
 
-  <nav id="tabs" aria-label="Sections">
-    <button data-tab="cockpit">Overview</button>
-    <button data-tab="holds">Holds <span class="count" id="countHolds"></span></button>
-    <button data-tab="matcher">Match tracking <span class="count" id="countMatcher"></span></button>
-    <button data-tab="agents">Agent &amp; approvals <span class="count" id="countApprovals"></span></button>
-    <span class="sep" aria-hidden="true"></span>
-    <button data-tab="timeline">Release timeline</button>
-    <button data-tab="forecast">Cash goal</button>
-    <button data-tab="guard">Payment guard</button>
-    <button data-tab="disputes">Disputes <span class="count" id="countDisputes"></span></button>
-    <span class="sep" aria-hidden="true"></span>
-    <button data-tab="audit">Audit</button>
-    <button data-tab="logs">Logs</button>
-  </nav>
+  <nav id="tabs" aria-label="Screens" hidden></nav>
 
   <div class="alert" id="approvalAlert" role="status">
     <p id="approvalAlertText"></p>
@@ -170,7 +171,34 @@
   </div>
 
   <main>
-    <!-- ============ Overview ============ -->
+    <!-- ============ Start: choose a role ============ -->
+    <section class="view" id="view-start">
+      <div class="view-error" role="alert"><p></p><button class="btn small">Try again</button></div>
+      <div class="start">
+        <h1>What do you do here?</h1>
+        <p class="lede">Pick the work you came to do. You land on what needs you and only the screens for that job. You can switch at any time, and every screen stays one click away.</p>
+        <div class="roles" id="roleCards"></div>
+        <label class="field" style="max-width:340px"><span>Your name <span class="hint">· optional, recorded with your approvals in the audit trail</span></span>
+          <input type="text" id="nameInput" autocomplete="name" maxlength="40" placeholder="e.g. Priya"></label>
+        <p class="note">A role is a view, not a permission: this app has no user accounts. Changes on this deployment may need the access code.</p>
+      </div>
+    </section>
+
+    <!-- ============ Home: the role's work queue ============ -->
+    <section class="view" id="view-home">
+      <div class="view-error" role="alert"><p></p><button class="btn small">Try again</button></div>
+      <div class="view-head"><h1 id="homeTitle"></h1><p class="lede" id="homeLede"></p></div>
+      <div class="next" id="homeNext">
+        <div class="txt"><b id="homeNextTitle"></b><span id="homeNextBody"></span></div>
+        <button class="btn primary" id="btnHomePrimary" hidden></button>
+      </div>
+      <div id="gridHomeKpi" class="grid h-kpi" hidden></div>
+      <h2 id="homeQueueTitle">What needs you</h2>
+      <div id="gridQueue" class="grid h-grow"></div>
+      <div id="gridTour" class="grid h-grow" hidden></div>
+    </section>
+
+    <!-- ============ Held money (overview) ============ -->
     <section class="view" id="view-cockpit">
       <div class="view-error" role="alert"><p></p><button class="btn small">Try again</button></div>
       <div class="next" id="nextStep">

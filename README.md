@@ -27,12 +27,20 @@ Rules the code enforces: **no upload without an approval** (signed one-click lin
 
 ## The cockpit
 
-One page, ten screens, every table an AG Grid. It is built around the seller's next step:
+People arrive with a job to do, so the cockpit starts by asking what it is. Each role gets a home with its own work queue (an AG Grid, grouped by kind of work, with the money, the deadline and a button on every row) and only the screens that job uses. Every other screen stays one click away.
 
-- **Overview** opens with the one thing to do next (review parcels, decide a waiting plan, or nothing), then the held total, the release forecast and why PayPal is holding.
-- **Holds** and **Match tracking** only let you tick parcels that can really be uploaded. Each row says whether a **real PayPal order** or **demo data** is behind it, and every upload asks first and states exactly what will be sent to PayPal and what is only recorded as a simulation.
-- **Agent & approvals** shows the plan parcel by parcel before you approve or reject it, the four agents and what each last did, and every step of every run.
-- A banner and a count in the navigation show a plan waiting for a decision from any screen. Screens link by URL (`#holds`, `#agents`), failures show a message with a retry, and holds and the audit chain export to CSV.
+| Role | Arrives from | Home queue | Screens |
+|---|---|---|---|
+| **Owner** | Slack approval message, bookmark | Plans to decide, money that can release sooner, account health | Approvals, Held money, Cash goal, Release timeline |
+| **Fulfilment** | A carrier export arriving through Zapier | Parcels ready to upload, matches to check, paid orders not shipped, failed uploads | Match tracking, Holds |
+| **Support** | A dispute alert, an email to check before shipping | Disputes by reply date, payments PayPal is still reviewing | Disputes, Payment guard |
+| **Admin** | A failure alert | Failed runs, errors, disconnected services, audit chain state | Agent runs, Audit, Logs |
+| **Guided tour** | The submission link | Seven steps through the loop, each marked real or simulated | All screens |
+
+- Links carry the role: the Slack approval message opens `/?role=owner#agents`, where the plan can be read parcel by parcel.
+- A role is a view, not a permission (the app has no user accounts). An optional name is recorded with approvals in the audit trail.
+- **Holds** and **Match tracking** only let you tick parcels that can really be uploaded. Each row says whether a **real PayPal order** or **demo data** is behind it, and every upload asks first and states exactly what goes to PayPal and what is only recorded as a simulation.
+- A banner and a count in the navigation show a plan waiting for a decision from any screen. Failures show a message with a retry, and holds and the audit chain export to CSV.
 
 ## Sponsor platforms, honestly
 
@@ -63,7 +71,7 @@ One page, ten screens, every table an AG Grid. It is built around the seller's n
 npm install
 cp .env.example .env      # fill in PayPal sandbox keys and DATABASE_URL (Supabase Postgres)
 npm run build && npm start   # http://localhost:10000
-npm test                  # 68 tests, hermetic: no network, no real credentials, in-memory Postgres
+npm test                  # 71 tests, hermetic: no network, no real credentials, in-memory Postgres
 ```
 
 Key environment variables are listed in `.env.example`. Only `DATABASE_URL` and the PayPal sandbox credentials are required; each sponsor integration switches on when its key is set. `AG_GRID_API_KEY` is an AG Grid Enterprise + Charts trial key (the trial in this repo expires 10 Dec 2026; after that the grids keep working with an evaluation watermark).

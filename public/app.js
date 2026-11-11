@@ -177,12 +177,72 @@
     document.addEventListener('keydown', (e) => { if (e.key === 'Escape') $('integrations').open = false; });
   })();
 
+  // ---------- roles ----------
+  // A role is a view of the same product: a home queue plus the screens that job uses. Not a permission.
+  const TAB_LABEL = {
+    home: 'Home', cockpit: 'Held money', holds: 'Holds', matcher: 'Match tracking', agents: 'Agent & approvals', timeline: 'Release timeline',
+    forecast: 'Cash goal', guard: 'Payment guard', disputes: 'Disputes', audit: 'Audit', logs: 'Logs'
+  };
+  const ALL_TABS = ['home', 'cockpit', 'holds', 'matcher', 'agents', 'timeline', 'forecast', 'guard', 'disputes', 'audit', 'logs'];
+  const ROLE = {
+    owner: { name: 'Owner', who: 'I run the shop and decide what gets sent to PayPal.', tabs: ['home', 'agents', 'cockpit', 'forecast', 'timeline'], labels: { agents: 'Approvals' },
+      lede: 'What is held, what can release sooner, and the plans waiting for your decision.', empty: 'Nothing needs you right now.' },
+    fulfilment: { name: 'Fulfilment', who: 'I ship orders and handle carrier tracking.', tabs: ['home', 'matcher', 'holds'], labels: {},
+      lede: 'Parcels whose tracking PayPal has not seen, and paid orders that still need to ship.', empty: 'No parcels are waiting. New ones appear when a carrier export arrives.' },
+    support: { name: 'Support', who: 'I answer disputes and check payments before we ship.', tabs: ['home', 'disputes', 'guard'], labels: {},
+      lede: 'Disputes by reply date, and payments PayPal is still reviewing.', empty: 'No open disputes. Paste a “payment received” email into Payment guard before you ship.' },
+    admin: { name: 'Admin', who: 'I keep the agents and connections running.', tabs: ['home', 'agents', 'audit', 'logs'], labels: { agents: 'Agent runs' },
+      lede: 'Failed runs, errors, disconnected services and the state of the audit chain.', empty: 'Nothing needs attention.' },
+    tour: { name: 'Guided tour', who: 'I want to see the whole loop once, start to finish.', tabs: ALL_TABS, labels: {},
+      lede: 'Five steps from held money to a verified upload. Each step says what is real and what is simulated.', empty: '' }
+  };
+  const remember = (key, value) => { try { value == null ? localStorage.removeItem(key) : localStorage.setItem(key, value); } catch { /* storage blocked: keep it for this page only */ } };
+  const recall = (key) => { try { return localStorage.getItem(key) || ''; } catch { return ''; } };
+  let role = ROLE[recall('unhold.role')] ? recall('unhold.role') : '';
+  let userName = recall('unhold.name');
+  let showAllTabs = false;
+  const actor = () => (userName ? `${userName} (cockpit)` : 'cockpit');
+
   // ---------- navigation ----------
   const loaders = {
+    start: loadStart, home: loadHome,
     cockpit: loadCockpit, holds: loadHolds, matcher: loadMatcher, agents: loadAgents, timeline: loadTimeline,
     forecast: loadForecast, guard: initGuardGrid, disputes: loadDisputes, audit: loadAudit, logs: loadLogs
   };
-  let currentTab = 'cockpit';
+  let currentTab = 'start';
+  const counts = {};
+
+  /** The role's screens, plus the current one if a queue action led somewhere outside them. */
+  function buildNav() {
+    const nav = $('tabs');
+    nav.hidden = !role || currentTab === 'start';
+    $('btnRole').hidden = !role;
+    if (!role) return;
+    $('btnRole').textContent = `${ROLE[role].name} view · Switch`;
+    $('btnRole').title = 'Choose a different role';
+    const mine = ROLE[role].tabs;
+    const tabs = showAllTabs ? ALL_TABS : mine.includes(currentTab) || currentTab === 'start' ? mine : [...mine, currentTab];
+    nav.replaceChildren(
+      ...tabs.map((tab) => {
+        const c = counts[tab];
+        const b = el('button', null, ROLE[role].labels[tab] || TAB_LABEL[tab]);
+        if (c && c.n) b.append(el('span', { className: 'count' + (c.attn ? ' attn' : ''), textContent: String(c.n) }));
+        if (tab === currentTab) b.setAttribute('aria-current', 'page');
+        b.addEventListener('click', () => showTab(tab));
+        return b;
+      })
+    );
+    if (mine.length < ALL_TABS.length) {
+      const more = el('button', { className: 'more', textContent: showAllTabs ? 'Show my screens' : 'Show all screens' });
+      more.setAttribute('aria-pressed', String(showAllTabs));
+      more.addEventListener('click', () => { showAllTabs = !showAllTabs; buildNav(); });
+      nav.append(el('span', { className: 'sep' }), more);
+    }
+  }
+  function setCount(tab, n, attn) {
+    counts[tab] = { n, attn: Boolean(attn) };
+    buildNav();
+  }
 
   async function runView(tab) {
     const view = $('view-' + tab);
@@ -200,18 +260,27 @@
     }
   }
   function showTab(tab, { push = true } = {}) {
-    if (!loaders[tab]) tab = 'cockpit';
+    if (!loaders[tab]) tab = role ? 'home' : 'start';
+    if (!role) tab = 'start';
     currentTab = tab;
-    document.querySelectorAll('#tabs button').forEach((b) => {
-      if (b.dataset.tab === tab) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current');
-    });
     document.querySelectorAll('.view').forEach((v) => v.classList.toggle('active', v.id === 'view-' + tab));
     if (push && location.hash !== '#' + tab) history.pushState(null, '', '#' + tab);
+    buildNav();
     renderApprovalAlert();
     return runView(tab);
   }
-  document.querySelectorAll('#tabs button').forEach((b) => b.addEventListener('click', () => showTab(b.dataset.tab)));
+  /** Open a screen from a queue row or a next-step button, optionally with a holds filter applied. */
+  async function go(tab, holdFilter) {
+    await showTab(tab);
+    if (tab === 'holds' && holdFilter) setHoldFilter(holdFilter);
+  }
+  function setRole(next) {
+    role = next;
+    showAllTabs = false;
+    remember('unhold.role', next);
+  }
   window.addEventListener('popstate', () => showTab(location.hash.slice(1), { push: false }));
+  $('btnRole').addEventListener('click', () => showTab('start'));
   $('btnRefresh').addEventListener('click', async () => {
     $('btnRefresh').disabled = true;
     await Promise.all([refreshCounts(), runView(currentTab)]);
@@ -226,16 +295,15 @@
     if (summary.status === 'fulfilled') store.summary = summary.value;
     if (approvals.status === 'fulfilled') store.approvals = approvals.value.approvals || [];
     if (disputes.status === 'fulfilled') store.disputes = disputes.value.disputes || [];
-    const setCount = (id, n, attn) => { $(id).textContent = n ? String(n) : ''; $(id).classList.toggle('attn', Boolean(attn && n)); };
-    setCount('countHolds', store.summary ? store.summary.speedable_holds_count : 0, false);
-    setCount('countApprovals', pendingApprovals().length, true);
-    setCount('countDisputes', store.disputes.filter((d) => !/RESOLVED/.test(d.status)).length, true);
+    setCount('holds', store.summary ? store.summary.speedable_holds_count : 0, false);
+    setCount('agents', pendingApprovals().length, true);
+    setCount('disputes', store.disputes.filter((d) => !/RESOLVED/.test(d.status)).length, true);
     renderApprovalAlert();
     renderNextStep();
   }
   function renderApprovalAlert() {
     const p = pendingApprovals();
-    const show = p.length > 0 && currentTab !== 'agents';
+    const show = p.length > 0 && currentTab !== 'agents' && currentTab !== 'start' && Boolean(role);
     $('approvalAlert').classList.toggle('show', show);
     if (show) $('approvalAlertText').textContent = `${p[0].title} is waiting for your decision (${money(p[0].total_usd)}).`;
   }
@@ -258,7 +326,7 @@
     };
     const p = pendingApprovals();
     if (p.length) {
-      set('attn', 'A plan is waiting for your decision', `${p[0].title} · ${money(p[0].total_usd)}. Nothing is uploaded until you approve.`, ['Review plan', () => showTab('agents')]);
+      set('attn', 'A plan is waiting for your decision', `${p[0].title} · ${money(p[0].total_usd)}. Nothing is uploaded until you approve.`, ['Review plan', () => go('agents')]);
     } else if (s.speedable_holds_count > 0) {
       set('', `Release ${money(s.speedable_amount_usd)} about ${s.avg_days_sooner} days sooner`,
         `${plural(s.speedable_holds_count, 'shipped parcel')} have tracking that PayPal has not seen yet.`,
@@ -268,7 +336,144 @@
     }
   }
 
-  // ================= Overview =================
+  // ================= Start: choose a role =================
+  async function loadStart() {
+    $('nameInput').value = userName;
+    const cards = $('roleCards');
+    const render = (inbox) => {
+      cards.replaceChildren(
+        ...Object.entries(ROLE).map(([key, r]) => {
+          const live = inbox && inbox.roles[key];
+          const b = el('button', { className: 'role' },
+            el('span', { className: 'top' }, el('span', { className: 'name', textContent: r.name }), live && live.todo ? chip(`${live.todo} to do`, 'warn') : key === 'tour' ? chip('Start here if you are new', 'info') : null),
+            el('span', { className: 'who', textContent: r.who }),
+            el('span', { className: 'live', textContent: key === 'tour' ? 'Five steps through the whole loop' : live ? live.headline : 'Loading…' }),
+            el('span', { className: 'sub', textContent: key === 'tour' ? 'Each step is marked real or simulated' : live ? live.sub : '' })
+          );
+          if (key === role) b.setAttribute('aria-current', 'true');
+          b.addEventListener('click', () => { setRole(key); showTab('home'); });
+          return b;
+        })
+      );
+    };
+    render(null);
+    render(await api('/api/inbox'));
+  }
+  $('nameInput').addEventListener('input', () => {
+    userName = $('nameInput').value.trim().slice(0, 40);
+    remember('unhold.name', userName || null);
+  });
+
+  // ================= Home: the role's work queue =================
+  const KIND_ORDER = ['decision', 'opportunity', 'health', 'result', 'review', 'ready', 'unmatched', 'not_shipped', 'failed_upload', 'dispute', 'payment_review',
+    'failed_run', 'stale', 'chain', 'error', 'connection', 'check'];
+  const WHEN_LABEL = { ready: 'PayPal releases', review: 'PayPal releases', not_shipped: 'PayPal releases', payment_review: 'PayPal releases', dispute: 'Reply by',
+    decision: 'Asked', stale: 'Asked', result: 'Finished', failed_run: 'Started', error: 'Logged', failed_upload: 'Logged' };
+  const ITEM_STATE = { todo: ['To do', 'warn'], info: ['For information', 'info'], ok: ['Healthy', 'good'] };
+  function whenText(item) {
+    if (!item.due) return '';
+    const days = Math.round((Date.parse(item.due) - Date.now()) / DAY);
+    const rel = days > 0 ? `in ${plural(days, 'day')}` : days === 0 ? 'today' : `${plural(-days, 'day')} ago`;
+    return `${WHEN_LABEL[item.kind] || ''} ${day(item.due)} · ${rel}`.trim();
+  }
+  const TOUR = [
+    { n: 1, title: 'See what PayPal is holding and why', detail: 'The held total, when it releases, and the causes PayPal reacts to.', truth: ['Simulated history', 'warn'], note: 'The PayPal sandbox cannot create seller holds, so the hold history is seeded.', tab: 'cockpit' },
+    { n: 2, title: 'Match carrier parcels to PayPal orders', detail: 'Each parcel from the carrier export is matched to an order, with a confidence and a reason.', truth: ['Real logic, demo parcels', 'info'], note: '', tab: 'matcher' },
+    { n: 3, title: 'Let the agent team propose a plan', detail: 'Choose “Demo data”, then run the agent. Four agents look up orders, check prices, scan disputes and build an upload plan.', truth: ['Real run', 'good'], note: 'Real PayPal lookups, catalog checks and language model calls.', tab: 'agents' },
+    { n: 4, title: 'Read the plan, then approve or reject it', detail: 'Open the waiting plan to see every parcel. Nothing is uploaded until a person decides, here or from the Slack message.', truth: ['Real for real orders', 'good'], note: 'Real sandbox orders are uploaded to PayPal. Demo parcels are recorded as a simulation.', tab: 'agents' },
+    { n: 5, title: 'Verify what happened', detail: 'Every step is written to a hash chain that is re-verified when you open the screen.', truth: ['Real', 'good'], note: '', tab: 'audit' },
+    { n: 6, title: 'Extra: check a “payment received” email', detail: 'Paste the example fake notice. Unhold looks the payment up in PayPal before you ship.', truth: ['Real PayPal lookup', 'good'], note: '', tab: 'guard' },
+    { n: 7, title: 'Extra: ask the holds table a question', detail: 'Type a question in plain English, or search the whole ledger.', truth: ['Real', 'good'], note: 'Language model for filters, Elastic for search.', tab: 'holds' }
+  ];
+
+  const queueGroupSize = {};
+  function actionButton(label, onClick) {
+    const b = el('button', { className: 'btn small', textContent: label });
+    b.addEventListener('click', onClick);
+    return b;
+  }
+
+  async function loadHome() {
+    const r = ROLE[role];
+    $('homeTitle').textContent = `${r.name === 'Guided tour' ? 'Guided tour' : r.name + ' home'}${userName ? ' · ' + userName : ''}`;
+    $('homeLede').textContent = r.lede;
+    const isTour = role === 'tour';
+    $('gridQueue').hidden = isTour;
+    $('gridTour').hidden = !isTour;
+    $('homeNext').hidden = isTour;
+    $('gridHomeKpi').hidden = role !== 'owner';
+    $('homeQueueTitle').textContent = isTour ? 'The loop, step by step' : 'What needs you';
+
+    if (isTour) {
+      makeGrid('tour', $('gridTour'), {
+        defaultColDef: PLAIN,
+        columnDefs: [
+          { field: 'n', headerName: 'Step', width: 80 },
+          { field: 'title', headerName: 'What to do', flex: 1.2, minWidth: 240, wrapText: true, autoHeight: true, cellStyle: { fontWeight: 600 } },
+          { field: 'detail', headerName: 'What you will see', flex: 2, minWidth: 300, wrapText: true, autoHeight: true, valueGetter: (p) => [p.data.detail, p.data.note].filter(Boolean).join(' ') },
+          { field: 'truth', headerName: 'Real or simulated', width: 210, cellRenderer: (p) => chip(...p.value) },
+          { headerName: 'Open', colId: 'open', width: 150, cellRenderer: (p) => actionButton(`Open step ${p.data.n}`, () => go(p.data.tab)) }
+        ],
+        rowData: TOUR, getRowId: (p) => String(p.data.n), suppressCellFocus: true
+      });
+      return;
+    }
+
+    busy('queue', true);
+    const inbox = await api('/api/inbox');
+    const card = inbox.roles[role];
+    $('homeNext').className = 'next' + (card.todo ? '' : ' done');
+    $('homeNextTitle').textContent = card.headline;
+    $('homeNextBody').textContent = card.sub;
+    const primary = $('btnHomePrimary');
+    primary.hidden = !card.primary;
+    if (card.primary) { primary.textContent = card.primary.label; primary.onclick = () => go(card.primary.tab, card.primary.hold_filter); }
+
+    if (role === 'owner') {
+      const s = store.summary || (await api('/api/summary'));
+      store.summary = s;
+      const big = (color) => ({ fontSize: '20px', fontWeight: 700, ...(color ? { color } : {}) });
+      const row = [{ held: s.total_withheld_usd, holds: s.open_holds_count, speed: s.speedable_amount_usd, parcels: s.speedable_holds_count, days: s.avg_days_sooner, health: s.health_score, band: s.health_band }];
+      const g = makeGrid('homeKpi', $('gridHomeKpi'), {
+        defaultColDef: PLAIN,
+        columnDefs: [
+          { headerName: 'Held by PayPal', field: 'held', valueFormatter: (p) => money(p.value), cellStyle: big(), minWidth: 150, flex: 1 },
+          { headerName: 'Payments on hold', field: 'holds', cellStyle: big(), minWidth: 140, flex: 0.8 },
+          { headerName: 'Can release sooner', field: 'speed', valueFormatter: (p) => money(p.value), cellStyle: big('#3fb950'), minWidth: 160, flex: 1 },
+          { headerName: 'Parcels · days sooner', valueGetter: (p) => `${p.data.parcels} parcels · ${p.data.days} days`, minWidth: 180, flex: 1 },
+          { headerName: 'Account health', field: 'health', minWidth: 180, flex: 1,
+            cellRenderer: (p) => el('span', null, el('b', { style: 'font-size:20px', textContent: p.value }), el('span', { className: 'note', textContent: '/100 ' }), chip(p.data.band, p.value >= 70 ? 'good' : 'warn')) }
+        ],
+        rowData: row, rowHeight: 60, headerHeight: 34, suppressCellFocus: true
+      });
+      g.setGridOption('rowData', row);
+    }
+
+    const rows = inbox.items.filter((i) => i.role === role).sort((a, b) => KIND_ORDER.indexOf(a.kind) - KIND_ORDER.indexOf(b.kind));
+    // Long groups (dozens of parcels) start closed so every kind of work is visible at once.
+    for (const k of Object.keys(queueGroupSize)) delete queueGroupSize[k];
+    for (const r0 of rows) queueGroupSize[r0.kind_label] = (queueGroupSize[r0.kind_label] || 0) + 1;
+    const g = makeGrid('queue', $('gridQueue'), {
+      columnDefs: [
+        { field: 'kind_label', rowGroup: true, hide: true },
+        { headerName: 'Action', colId: 'action', width: 185, sortable: false, cellRenderer: (p) => (p.data && p.data.tab ? actionButton(p.data.action, () => go(p.data.tab, p.data.hold_filter)) : '') },
+        { field: 'amount', headerName: 'Money', width: 120, type: 'rightAligned', aggFunc: 'sum', valueFormatter: (p) => (p.value ? money(p.value) : '') },
+        { field: 'due', headerName: 'When', width: 235, valueFormatter: (p) => (p.data ? whenText(p.data) : '') },
+        { field: 'detail', headerName: 'Detail', flex: 2, minWidth: 300, wrapText: true, autoHeight: true },
+        { field: 'state', headerName: 'Status', width: 150, cellRenderer: (p) => (p.data ? chip(...ITEM_STATE[p.value]) : '') }
+      ],
+      defaultColDef: { sortable: true, resizable: true, suppressHeaderMenuButton: true },
+      autoGroupColumnDef: { headerName: 'What needs you', field: 'title', flex: 1.5, minWidth: 300, sortable: false },
+      rowData: rows, getRowId: (p) => p.data.id, suppressAggFuncInHeader: true,
+      isGroupOpenByDefault: (p) => (queueGroupSize[p.key] || 0) <= 12,
+      overlayNoRowsTemplate: 'Nothing needs you right now'
+    });
+    g.setGridOption('rowData', rows);
+    g.setGridOption('overlayNoRowsTemplate', r.empty);
+    busy('queue', false);
+  }
+
+  // ================= Held money (overview) =================
   let waterfallMode = 'now';
 
   async function loadCockpit() {
@@ -699,8 +904,7 @@
     busy('matcher', false);
     const n = (s) => rows.filter((r) => r.state === s).length;
     setStatus('matcherStatus', [`${n('ready')} ready`, `${n('review')} need your review`, `${n('done')} already in PayPal`, n('none') ? `${n('none')} with no order` : ''].filter(Boolean).join(' · '));
-    $('countMatcher').textContent = n('review') ? String(n('review')) : '';
-    $('countMatcher').classList.toggle('attn', n('review') > 0);
+    setCount('matcher', n('review'), true);
     updateMatcherButton();
   }
   function updateMatcherButton() {
@@ -1023,7 +1227,7 @@ Seller Protection: Eligible`;
         if (!answer.ok) return;
         b.disabled = true;
         try {
-          const r = await post(`/api/agent/approvals/${encodeURIComponent(a.id)}/decision`, { decision, by: 'cockpit' });
+          const r = await post(`/api/agent/approvals/${encodeURIComponent(a.id)}/decision`, { decision, by: actor() });
           if (r.ok) toast(approving ? 'Plan approved. The agent is uploading now.' : 'Plan rejected. Nothing was uploaded.', 'good');
           else toast(r.reason || 'That request was already decided.', 'bad');
         } catch (e) {
@@ -1205,9 +1409,15 @@ Seller Protection: Eligible`;
   $('btnLogsRefresh').addEventListener('click', () => runView('logs'));
 
   // ---------- boot ----------
+  // A link can carry the role it is meant for, e.g. the Slack approval message opens /?role=owner#agents.
+  const linkRole = new URLSearchParams(location.search).get('role');
+  if (ROLE[linkRole]) {
+    setRole(linkRole);
+    history.replaceState(null, '', location.pathname + location.hash);
+  }
   refreshCounts();
   setInterval(() => { if (!document.hidden) refreshCounts(); }, 20000);
-  await showTab(location.hash.slice(1) || 'cockpit', { push: false });
+  await showTab(role ? location.hash.slice(1) || 'home' : 'start', { push: false });
 })().catch((e) => {
   console.error(e);
   const box = document.createElement('p');

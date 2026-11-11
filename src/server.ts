@@ -44,6 +44,7 @@ import { startTracing, stopTracing, tracingEnabled } from './obs/tracing.js';
 import { startRun, decideApproval, recoverStaleRuns, RunConflictError, type Goal, type Mode } from './agents/supervisor.js';
 import { verifyApprovalToken } from './agents/approvals.js';
 import { orderChecksFor } from './agents/tools.js';
+import { buildInbox } from './engine/inbox.js';
 import { zapierMcpConfigured } from './agents/zapier_mcp.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -301,12 +302,36 @@ export async function createServer(customDb?: LedgerDB, customPayPal?: PayPalCli
       approvals: (await db.listApprovals(50)).filter((a) => a.run_id === id).map((a) => ({ ...a, payload: parse(a.payload) }))
     };
   });
-  fastify.get('/api/agent/approvals', async () => ({
-    approvals: (await db.listApprovals(40)).map((a) => {
+  // What the connected services are for, in one place (the cockpit header and the admin queue use it).
+  const connections = () => [
+    { name: 'PayPal', ok: paypalConfigured, role: 'Orders, tracking uploads and webhooks' },
+    { name: 'Zapier', ok: Boolean(process.env.ZAPIER_WEBHOOK_URL), role: 'Approval requests and results to Slack' },
+    { name: 'Astropods', ok: Boolean(process.env.ASTROPODS_API_KEY) || /astro/i.test(process.env.OTEL_EXPORTER_OTLP_ENDPOINT ?? ''), role: 'Hosts the agent team, sign-in and traces' },
+    { name: 'Elastic', ok: Boolean(process.env.ELASTIC_URL && process.env.ELASTIC_API_KEY), role: 'Search across the ledger' },
+    { name: 'Kernel', ok: Boolean(process.env.KERNEL_API_KEY), role: 'Reads carrier pages to confirm delivery' },
+    { name: 'Channel3', ok: Boolean(process.env.CHANNEL3_API_KEY), role: 'Catalog price check on held items' },
+    { name: 'Language model', ok: llmConfigured(), role: 'Explanations and plain-English filters' }
+  ];
+  const flatApprovals = async () =>
+    (await db.listApprovals(40)).map((a) => {
       const p = (() => { try { return JSON.parse(a.payload); } catch { return {}; } })();
       return { ...a, payload: undefined, orders: p.plan?.items?.length ?? 0, total_usd: p.plan?.total_usd ?? 0, mode: p.plan?.mode, summary: p.summary };
-    })
-  }));
+    });
+
+  // Work queues by role: what needs the owner, fulfilment, support and the admin right now.
+  fastify.get('/api/inbox', async () => {
+    const [holds, manifests, approvals, disputes, runs, audit, summary] = await Promise.all([
+      db.getAllHolds(), db.getAllManifests(), flatApprovals(), db.getAllDisputes(), db.listRuns(40), db.getAuditChain(), db.getSummary()
+    ]);
+    const chain = await db.verifyLedgerAuditChain();
+    return {
+      as_of: new Date().toISOString(),
+      connections: connections(),
+      ...buildInbox({ holds, matches: matchAllManifests(manifests, holds).matches, approvals, disputes, runs, audit, chainValid: chain.valid, summary, connections: connections() })
+    };
+  });
+
+  fastify.get('/api/agent/approvals', async () => ({ approvals: await flatApprovals() }));
   fastify.post('/api/agent/approvals/:id/decision', async (req, reply) => {
     const body = (req.body || {}) as { decision?: string; by?: string };
     if (body.decision !== 'approved' && body.decision !== 'rejected') return reply.status(400).send({ error: 'decision must be approved or rejected' });
@@ -331,7 +356,8 @@ export async function createServer(customDb?: LedgerDB, customPayPal?: PayPalCli
     return reply.type('text/html').send(page(`${d === 'approve' ? 'Approve' : 'Reject'}: ${esc(a.title)}`,
       `<p>${esc(String(p.summary || ''))}</p><p><b>${p.plan?.items?.length ?? 0}</b> parcels · <b>$${Number(p.plan?.total_usd ?? 0).toFixed(2)}</b> · mode ${esc(String(p.plan?.mode ?? ''))}</p>
 <form method="post" action="/approve/${esc(id)}"><input type="hidden" name="d" value="${d}"><input type="hidden" name="t" value="${esc(q.t || '')}">
-<button style="font-size:16px;padding:10px 18px;border-radius:8px;border:0;background:${d === 'approve' ? '#1a7f37' : '#cf222e'};color:#fff;cursor:pointer">Confirm ${d}</button></form>`));
+<button style="font-size:16px;padding:10px 18px;border-radius:8px;border:0;background:${d === 'approve' ? '#1a7f37' : '#cf222e'};color:#fff;cursor:pointer">Confirm ${d}</button></form>
+<p><a href="/?role=owner#agents">See every parcel in the plan first</a></p>`));
   });
   fastify.post('/approve/:id', async (req, reply) => {
     const id = (req.params as { id: string }).id;
@@ -340,7 +366,7 @@ export async function createServer(customDb?: LedgerDB, customPayPal?: PayPalCli
     if (!verifyApprovalToken(id, d, form.get('t') || '')) return reply.status(403).type('text/html').send(page('Link not valid', '<p>This approval link is invalid or has been altered.</p>'));
     const r = await decideApproval(agentCtx, id, d === 'approve' ? 'approved' : 'rejected', 'slack-link');
     return reply.type('text/html').send(page(r.ok ? (d === 'approve' ? 'Approved' : 'Rejected') : 'Nothing changed',
-      r.ok ? `<p>Done. The agent ${d === 'approve' ? 'is uploading the tracking now' : 'will not upload anything'}. You can close this tab.</p>` : `<p>${esc(r.reason || 'Could not apply that decision.')}</p>`));
+      r.ok ? `<p>Done. The agent ${d === 'approve' ? 'is uploading the tracking now' : 'will not upload anything'}. You can close this tab, or <a href="/?role=owner#agents">open the cockpit</a> to watch it.</p>` : `<p>${esc(r.reason || 'Could not apply that decision.')}</p><p><a href="/?role=owner#agents">Open the cockpit</a></p>`));
   });
 
   // --- Health Check for Render ---

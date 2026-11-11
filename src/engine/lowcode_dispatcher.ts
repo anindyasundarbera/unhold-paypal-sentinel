@@ -83,7 +83,7 @@ export async function dispatchZapierEvent(
       `*${d.title ?? 'Agent plan'}*`,
       `• *Orders:* ${d.orders ?? 0} · *Cash affected:* $${Number(d.total_usd ?? 0).toFixed(2)} · *Avg release advance:* ${d.avg_days_saved ?? 0} days`,
       `• *Agent summary:* ${d.summary ?? '—'}`,
-      `<${d.approve_url}|:white_check_mark: Approve> · <${d.reject_url}|:x: Reject>`,
+      `<${d.approve_url}|:white_check_mark: Approve> · <${d.reject_url}|:x: Reject>${d.cockpit_url ? ` · <${d.cockpit_url}|See every parcel in Unhold>` : ''}`,
       `_Run \`${d.run_id ?? '—'}\` · nothing moves until you approve._`
     ].join('\n');
   } else if (payload.event === 'agent.run_completed' || payload.event === 'agent.run_failed' || payload.event === 'agent.run_rejected') {
