@@ -12,7 +12,7 @@ name: unhold-agent-team
 
 agent:
   # Built by .github/workflows/astropods-image.yml (no local Docker needed).
-  image: ghcr.io/anindyasundarbera/unhold-paypal-sentinel:latest
+  image: ghcr.io/anindyasundarbera/unhold-paypal-sentinel:283454f45d9e2ba4d6e630057d485c157da35add
   distributed: false
   interfaces:
     frontend: true
@@ -74,6 +74,11 @@ agent:
       datatype: string
       secret: true
       description: Shared secret Zapier sends in x-unhold-secret to ingest manifests and start runs.
+    - name: DATABASE_URL
+      datatype: string
+      secret: true
+      optional: true
+      description: Supabase Postgres connection string. Set it to share the same ledger as the Render service; when empty the bound knowledge store (POSTGRES_*) is used.
     - name: ELASTIC_URL
       datatype: string
       optional: true

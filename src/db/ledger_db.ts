@@ -274,6 +274,17 @@ export class LedgerDB {
     return undefined;
   }
 
+  /** TLS for hosted databases (Supabase); off for in-cluster/local ones (Astropods' bound store has no TLS). */
+  static sslFor(connectionString: string): { rejectUnauthorized: false } | false {
+    try {
+      const host = new URL(connectionString).hostname;
+      if (host === 'localhost' || host === '127.0.0.1' || host.endsWith('.svc.cluster.local') || host.endsWith('.internal')) return false;
+    } catch {
+      /* fall through: keep TLS on */
+    }
+    return { rejectUnauthorized: false };
+  }
+
   static async connect(connectionString: string | undefined = LedgerDB.connectionStringFromEnv()): Promise<LedgerDB> {
     if (!connectionString || !/^postgres(ql)?:\/\//.test(connectionString)) {
       throw new Error(
@@ -283,7 +294,7 @@ export class LedgerDB {
     const pool = new pg.Pool({
       connectionString,
       max: 5,
-      ssl: { rejectUnauthorized: false },
+      ssl: LedgerDB.sslFor(connectionString),
       connectionTimeoutMillis: 10000,
       idleTimeoutMillis: 30000
     });

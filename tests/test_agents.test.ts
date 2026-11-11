@@ -185,3 +185,12 @@ describe('Production endpoints', () => {
     await db.close();
   });
 });
+
+describe('Ledger connection TLS', () => {
+  test('TLS stays on for hosted databases and is off for in-cluster/local ones', async () => {
+    const { LedgerDB } = await import('../src/db/ledger_db.js');
+    assert.deepEqual(LedgerDB.sslFor('postgresql://u:p@aws-0-us-east-1.pooler.supabase.com:5432/postgres'), { rejectUnauthorized: false });
+    assert.equal(LedgerDB.sslFor('postgresql://u:p@unhold-agent-team-knowledge-ledger.astro-x.svc.cluster.local:5432/db'), false);
+    assert.equal(LedgerDB.sslFor('postgresql://u:p@localhost:5432/db'), false);
+  });
+});
