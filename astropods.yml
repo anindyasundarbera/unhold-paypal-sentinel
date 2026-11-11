@@ -12,7 +12,7 @@ name: unhold-agent-team
 
 agent:
   # Built by .github/workflows/astropods-image.yml (no local Docker needed).
-  image: ghcr.io/anindyasundarbera/unhold-paypal-sentinel:283454f45d9e2ba4d6e630057d485c157da35add
+  image: ghcr.io/anindyasundarbera/unhold-paypal-sentinel:4ad4dfcb760793901598abb54c9c6054cb402eec
   distributed: false
   interfaces:
     frontend: true

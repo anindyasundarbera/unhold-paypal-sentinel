@@ -64,10 +64,10 @@ To put real orders behind holds: `npm run seed:live -- 4` creates sandbox orders
 ## Deploy
 
 - **Render:** `render.yaml` (web service plus a 6-hourly sweep).
-- **Astropods:** `ast spec validate && ast blueprint push unhold-agent-team && ast blueprint deploy unhold-agent-team`, binding the shared Supabase store at deploy. Astropods puts sign-in in front of the cockpit.
+- **Astropods:** deployed (agent `unhold-agent-team`, running) with the image built by `.github/workflows/astropods-image.yml` and published to GHCR, so no local Docker is needed: `ast spec validate && ast blueprint push unhold-agent-team --no-build && ast blueprint deploy unhold-agent-team --vars-file <env file>`. Astropods puts sign-in in front of the cockpit, and OpenTelemetry traces go to its collector. Set `agent.image` in `astropods.yml` to the newly built image tag before each push.
 
 ## Known limits
 
-- The Render deployment has no login; use the Astropods deployment (which does) for anything beyond a demo.
+- The Render deployment has no login; use the Astropods deployment (which has Astropods sign-in) for anything beyond a demo. Approval links still point at Render (`PUBLIC_BASE_URL`) so they work without an Astropods account.
 - Free-tier services and the Elastic and AG Grid trials expire; see dates above.
 - The "Ask the grid", reasoning and dispute-negotiation features call an LLM and fall back to rules when it is unavailable.
