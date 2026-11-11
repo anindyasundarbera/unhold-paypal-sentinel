@@ -324,7 +324,8 @@ export async function createServer(customDb?: LedgerDB, customPayPal?: PayPalCli
     integrations: {
       zapier: Boolean(process.env.ZAPIER_WEBHOOK_URL),
       zapierMcp: zapierMcpConfigured(),
-      astropods: Boolean(process.env.ASTROPODS_API_KEY),
+      // On when hosted on Astropods (it injects the OTLP collector address) or when a gateway key is set.
+      astropods: Boolean(process.env.ASTROPODS_API_KEY) || /astro/i.test(process.env.OTEL_EXPORTER_OTLP_ENDPOINT ?? ''),
       tracing: tracingEnabled,
       elastic: Boolean(process.env.ELASTIC_URL && process.env.ELASTIC_API_KEY),
       kernel: Boolean(process.env.KERNEL_API_KEY),
