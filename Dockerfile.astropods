@@ -9,10 +9,10 @@ RUN npm run build
 FROM node:24-slim AS runner
 WORKDIR /app
 
-# curl for the platform health check; setcap lets the non-root node user bind port 80
+# curl for the platform health check. Runs as root so it can bind port 80: file capabilities
+# (setcap) make exec fail with "Operation not permitted" under Kubernetes.
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends curl libcap2-bin \
-  && setcap cap_net_bind_service=+ep "$(readlink -f "$(command -v node)")" \
+  && apt-get install -y --no-install-recommends curl \
   && rm -rf /var/lib/apt/lists/*
 
 ENV NODE_ENV=production
@@ -24,8 +24,5 @@ RUN npm ci --omit=dev
 COPY --from=builder /app/dist ./dist
 COPY public/ ./public/
 COPY astropods.yml ./astropods.yml
-RUN chown -R node:node /app
-
-USER node
 EXPOSE 80
 CMD ["node", "dist/server.js"]
