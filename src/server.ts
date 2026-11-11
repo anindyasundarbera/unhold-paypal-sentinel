@@ -43,6 +43,7 @@ import { PINO_REDACT_PATHS } from './obs/redact.js';
 import { startTracing, stopTracing, tracingEnabled } from './obs/tracing.js';
 import { startRun, decideApproval, recoverStaleRuns, RunConflictError, type Goal, type Mode } from './agents/supervisor.js';
 import { verifyApprovalToken } from './agents/approvals.js';
+import { orderChecksFor } from './agents/tools.js';
 import { zapierMcpConfigured } from './agents/zapier_mcp.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -211,12 +212,42 @@ export async function createServer(customDb?: LedgerDB, customPayPal?: PayPalCli
     await stopTracing();
   });
 
-  const agentCtx = { db, paypal, baseUrl: process.env.PUBLIC_BASE_URL || `http://127.0.0.1:${PORT}` };
   const ingestSecretOk = (req: { headers: Record<string, unknown> }) => {
     const secret = process.env.INGEST_SHARED_SECRET;
     const sent = Buffer.from(String(req.headers['x-unhold-secret'] || ''));
     return Boolean(secret) && sent.length === Buffer.byteLength(secret as string) && timingSafeEqual(sent, Buffer.from(secret as string));
   };
+
+  // PayPal lookups only run with real credentials or an injected client (tests stay offline).
+  const paypalConfigured = Boolean(customPayPal || process.env.PAYPAL_CLIENT_ID);
+
+  // Holds whose PayPal order matters: ones that could be uploaded, and ones Unhold already uploaded.
+  const needsOrderCheck = (h: { tracking_number?: string | null; status: string; uploaded?: boolean }) =>
+    Boolean(h.tracking_number) && (h.status === 'seller_has' || h.status === 'unapproved' || h.uploaded === true);
+  if (!customDb && paypalConfigured) {
+    // Warm the order checks so the first page load does not wait on PayPal.
+    db.getAllHolds()
+      .then((holds) => orderChecksFor(paypal, holds.filter(needsOrderCheck).map((h) => h.order_id), 30000))
+      .catch(() => undefined);
+  }
+
+  // Optional gate for the public deployment: when COCKPIT_ACCESS_CODE is set, every call that changes
+  // something needs it in the x-unhold-access header. Reading stays open. Doors with their own proof
+  // (Zapier's shared secret, signed approval links, PayPal's webhook signature) are not affected.
+  const accessCode = process.env.COCKPIT_ACCESS_CODE || '';
+  fastify.addHook('preHandler', async (req, reply) => {
+    if (!accessCode || req.method === 'GET' || !req.url.startsWith('/api/')) return;
+    const route = req.routeOptions?.url || '';
+    if (route === '/api/manifests/ingest' || route === '/api/ai/grid-query' || route === '/api/manifests/match' || route === '/api/cash-goal/plan') return;
+    if (route === '/api/agent/runs' && ingestSecretOk(req as never)) return;
+    const sent = Buffer.from(String(req.headers['x-unhold-access'] || ''));
+    const want = Buffer.from(accessCode);
+    if (sent.length !== want.length || !timingSafeEqual(sent, want)) {
+      return reply.status(401).send({ error: 'access_code_required', message: 'This action needs the cockpit access code.' });
+    }
+  });
+
+  const agentCtx = { db, paypal, baseUrl: process.env.PUBLIC_BASE_URL || `http://127.0.0.1:${PORT}` };
 
   // --- Liveness / readiness / metrics ---
   fastify.get('/healthz', async () => ({ status: 'ok' }));
@@ -321,6 +352,7 @@ export async function createServer(customDb?: LedgerDB, customPayPal?: PayPalCli
     paypalEnvironment: process.env.PAYPAL_ENVIRONMENT || 'sandbox',
     simulatedHistory: true,
     simulateUploads: process.env.UNHOLD_SIMULATE_UPLOADS === 'true',
+    accessCodeRequired: Boolean(process.env.COCKPIT_ACCESS_CODE),
     integrations: {
       zapier: Boolean(process.env.ZAPIER_WEBHOOK_URL),
       zapierMcp: zapierMcpConfigured(),
@@ -451,8 +483,16 @@ ${hold ? `<p>${esc(hold.carrier || '')} Â· shipped ${esc((hold.shipped_at || 'â€
 
   fastify.get('/api/holds', async (req) => {
     const query = req.query as { status?: string };
+    const holds = await db.getAllHolds(query.status);
+    // Say which holds have a real PayPal order behind them: only those can be uploaded for real.
+    // Only holds that carry tracking are checked; the rest cannot be uploaded anyway.
+    const ids = paypalConfigured ? holds.filter(needsOrderCheck).map((h) => h.order_id) : [];
+    const checks = ids.length ? await orderChecksFor(paypal, ids) : {};
     return {
-      holds: await db.getAllHolds(query.status)
+      holds: holds.map((h) => ({
+        ...h,
+        paypal_order: checks[h.order_id] === 'live' ? 'real' : checks[h.order_id] === 'no_paypal_order' ? 'demo' : 'unknown'
+      }))
     };
   });
 

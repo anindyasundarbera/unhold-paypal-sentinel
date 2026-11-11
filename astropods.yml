@@ -12,7 +12,7 @@ name: unhold-agent-team
 
 agent:
   # Built by .github/workflows/astropods-image.yml (no local Docker needed).
-  image: ghcr.io/anindyasundarbera/unhold-paypal-sentinel:4ad4dfcb760793901598abb54c9c6054cb402eec
+  image: ghcr.io/anindyasundarbera/unhold-paypal-sentinel:148fc9c71cbc246c997ffd130c4b3ad830d497a9
   distributed: false
   interfaces:
     frontend: true
@@ -74,6 +74,11 @@ agent:
       datatype: string
       secret: true
       description: Shared secret Zapier sends in x-unhold-secret to ingest manifests and start runs.
+    - name: COCKPIT_ACCESS_CODE
+      datatype: string
+      secret: true
+      optional: true
+      description: When set, every change made from the cockpit needs this code. Reading stays open.
     - name: DATABASE_URL
       datatype: string
       secret: true

@@ -194,3 +194,43 @@ describe('Ledger connection TLS', () => {
     assert.equal(LedgerDB.sslFor('postgresql://u:p@localhost:5432/db'), false);
   });
 });
+
+describe('Cockpit safeguards', () => {
+  test('holds say whether a real PayPal order is behind them', async () => {
+    const db = await memoryLedger();
+    await seedLedger(db);
+    const server = await createServer(db, fakePayPal);
+    const { holds } = (await server.inject('/api/holds')).json();
+    const uploadable = holds.filter((h: { status: string; tracking_number?: string }) => h.status === 'seller_has' && h.tracking_number);
+    assert.ok(uploadable.length > 0);
+    assert.ok(uploadable.every((h: { paypal_order: string }) => h.paypal_order === 'demo'), 'seeded holds have no PayPal order');
+    assert.ok(holds.filter((h: { status: string }) => h.status === 'not_shipped').every((h: { paypal_order: string }) => h.paypal_order === 'unknown'));
+    await server.close();
+    await db.close();
+  });
+
+  test('with an access code set, changes need it and reading stays open', async () => {
+    process.env.COCKPIT_ACCESS_CODE = 'test-code-123';
+    try {
+      const db = await memoryLedger();
+      await seedLedger(db);
+      const server = await createServer(db, fakePayPal);
+      assert.equal((await server.inject('/api/summary')).statusCode, 200);
+      assert.equal((await server.inject('/api/config')).json().accessCodeRequired, true);
+
+      const blocked = await server.inject({ method: 'POST', url: '/api/manifests/upload', payload: { orderIds: [] } });
+      assert.equal(blocked.statusCode, 401);
+      assert.equal(blocked.json().error, 'access_code_required');
+      const wrong = await server.inject({ method: 'POST', url: '/api/agent/runs', headers: { 'x-unhold-access': 'nope' }, payload: { mode: 'simulated' } });
+      assert.equal(wrong.statusCode, 401);
+      assert.equal((await db.listRuns()).length, 0, 'a refused call must not start a run');
+
+      const allowed = await server.inject({ method: 'POST', url: '/api/agent/approvals/none/decision', headers: { 'x-unhold-access': 'test-code-123' }, payload: { decision: 'maybe' } });
+      assert.equal(allowed.statusCode, 400, 'passes the gate and reaches normal validation');
+      await server.close();
+      await db.close();
+    } finally {
+      delete process.env.COCKPIT_ACCESS_CODE;
+    }
+  });
+});

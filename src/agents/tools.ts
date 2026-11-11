@@ -34,6 +34,30 @@ export async function getCandidates(db: LedgerDB): Promise<Candidate[]> {
   return out.sort((a, b) => b.amount - a.amount);
 }
 
+/**
+ * Remembered PayPal order checks, so screens can say which holds have a real PayPal order without
+ * asking PayPal on every page load. A real order stays real; "no order" is rechecked after 10 minutes.
+ */
+const orderCheckCache = new Map<string, { check: OrderCheck; at: number }>();
+const NEGATIVE_TTL_MS = 10 * 60 * 1000;
+
+export function cachedOrderCheck(orderId: string): OrderCheck | undefined {
+  const hit = orderCheckCache.get(orderId);
+  if (!hit) return undefined;
+  if (hit.check !== 'live' && Date.now() - hit.at > NEGATIVE_TTL_MS) return undefined;
+  return hit.check;
+}
+
+/** Cached checks for these orders; unknown ones are looked up on PayPal, waiting at most `waitMs`. */
+export async function orderChecksFor(paypal: PayPalClient, orderIds: string[], waitMs = 4000): Promise<Record<string, OrderCheck | 'unknown'>> {
+  const missing = [...new Set(orderIds)].filter((id) => cachedOrderCheck(id) === undefined);
+  if (missing.length) {
+    const lookup = verifyOrders(paypal, missing, 10).catch(() => undefined);
+    await Promise.race([lookup, new Promise((r) => setTimeout(r, waitMs))]);
+  }
+  return Object.fromEntries(orderIds.map((id) => [id, cachedOrderCheck(id) ?? 'unknown']));
+}
+
 /** Payment Guard: confirm each order really exists on PayPal and was captured, with bounded concurrency. */
 export async function verifyOrders(paypal: PayPalClient, orderIds: string[], concurrency = 6): Promise<Record<string, OrderCheck>> {
   const result: Record<string, OrderCheck> = {};
@@ -45,9 +69,11 @@ export async function verifyOrders(paypal: PayPalClient, orderIds: string[], con
         const o = await paypal.getOrder(id);
         const captured = o.purchase_units?.some((u) => u.payments?.captures?.some((c) => c.status === 'COMPLETED'));
         result[id] = captured ? 'live' : 'no_paypal_order';
+        orderCheckCache.set(id, { check: result[id], at: Date.now() });
       } catch (err) {
         const msg = (err as Error).message;
         result[id] = /404|RESOURCE_NOT_FOUND|INVALID_RESOURCE_ID|not found/i.test(msg) ? 'no_paypal_order' : 'error';
+        if (result[id] === 'no_paypal_order') orderCheckCache.set(id, { check: result[id], at: Date.now() });
       }
     }
   };

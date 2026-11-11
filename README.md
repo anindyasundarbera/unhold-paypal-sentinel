@@ -25,6 +25,15 @@ A **Supervisor** runs `perceive → reason → plan → ask → (human approves)
 
 Rules the code enforces: **no upload without an approval** (signed one-click links; a decision counts once); **the model explains, code decides** (the policy chooses what may be proposed, and model text is rejected if it contains a figure the tools did not return, with a deterministic fallback); every step is recorded, traced, logged and counted.
 
+## The cockpit
+
+One page, ten screens, every table an AG Grid. It is built around the seller's next step:
+
+- **Overview** opens with the one thing to do next (review parcels, decide a waiting plan, or nothing), then the held total, the release forecast and why PayPal is holding.
+- **Holds** and **Match tracking** only let you tick parcels that can really be uploaded. Each row says whether a **real PayPal order** or **demo data** is behind it, and every upload asks first and states exactly what will be sent to PayPal and what is only recorded as a simulation.
+- **Agent & approvals** shows the plan parcel by parcel before you approve or reject it, the four agents and what each last did, and every step of every run.
+- A banner and a count in the navigation show a plan waiting for a decision from any screen. Screens link by URL (`#holds`, `#agents`), failures show a message with a retry, and holds and the audit chain export to CSV.
+
 ## Sponsor platforms, honestly
 
 | Platform | Role | Where |
@@ -45,7 +54,7 @@ Rules the code enforces: **no upload without an approval** (signed one-click lin
 - **Logs:** structured JSON (pino), secrets redacted, a request id on every call (`x-request-id`), warnings/errors and agent events persisted to Supabase and shown on the **Logs** screen.
 - **Tracing:** OpenTelemetry spans for each run and step (`gen_ai.*` / `unhold.*` attributes) when `OTEL_EXPORTER_OTLP_ENDPOINT` is set, which Astropods injects.
 - **Metrics and health:** `GET /metrics` (Prometheus), `/healthz`, `/readyz` (checks the ledger), graceful shutdown, stale-run recovery on start.
-- **Safety:** unsigned PayPal webhooks are refused on a live account; approval links are signed per decision and need a POST to act.
+- **Safety:** unsigned PayPal webhooks are refused on a live account; approval links are signed per decision and need a POST to act. Set `COCKPIT_ACCESS_CODE` to require a code for every change made from the cockpit (reading stays open).
 - **Audit:** a SHA-256 hash chain of every state change, verifiable from the cockpit.
 
 ## Run it
@@ -54,7 +63,7 @@ Rules the code enforces: **no upload without an approval** (signed one-click lin
 npm install
 cp .env.example .env      # fill in PayPal sandbox keys and DATABASE_URL (Supabase Postgres)
 npm run build && npm start   # http://localhost:10000
-npm test                  # 65 tests, hermetic: no network, no real credentials, in-memory Postgres
+npm test                  # 68 tests, hermetic: no network, no real credentials, in-memory Postgres
 ```
 
 Key environment variables are listed in `.env.example`. Only `DATABASE_URL` and the PayPal sandbox credentials are required; each sponsor integration switches on when its key is set. `AG_GRID_API_KEY` is an AG Grid Enterprise + Charts trial key (the trial in this repo expires 10 Dec 2026; after that the grids keep working with an evaluation watermark).
@@ -68,6 +77,6 @@ To put real orders behind holds: `npm run seed:live -- 4` creates sandbox orders
 
 ## Known limits
 
-- The Render deployment has no login; use the Astropods deployment (which has Astropods sign-in) for anything beyond a demo. Approval links still point at Render (`PUBLIC_BASE_URL`) so they work without an Astropods account.
+- The Render deployment has no login unless `COCKPIT_ACCESS_CODE` is set; use the Astropods deployment (which has Astropods sign-in) for anything beyond a demo. Approval links still point at Render (`PUBLIC_BASE_URL`) so they work without an Astropods account.
 - Free-tier services and the Elastic and AG Grid trials expire; see dates above.
 - The "Ask the grid", reasoning and dispute-negotiation features call an LLM and fall back to rules when it is unavailable.
