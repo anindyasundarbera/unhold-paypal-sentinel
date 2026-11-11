@@ -239,7 +239,8 @@ export async function createServer(customDb?: LedgerDB, customPayPal?: PayPalCli
   fastify.addHook('preHandler', async (req, reply) => {
     if (!accessCode || req.method === 'GET' || !req.url.startsWith('/api/')) return;
     const route = req.routeOptions?.url || '';
-    if (route === '/api/manifests/ingest' || route === '/api/ai/grid-query' || route === '/api/manifests/match' || route === '/api/cash-goal/plan') return;
+    // Read-only calls that use POST for their body: viewing must never ask for the code.
+    if (['/api/manifests/ingest', '/api/ai/grid-query', '/api/manifests/match', '/api/cash-goal/plan', '/api/audit/verify', '/api/prompt-guard/check'].includes(route)) return;
     if (route === '/api/agent/runs' && ingestSecretOk(req as never)) return;
     const sent = Buffer.from(String(req.headers['x-unhold-access'] || ''));
     const want = Buffer.from(accessCode);
@@ -357,7 +358,7 @@ export async function createServer(customDb?: LedgerDB, customPayPal?: PayPalCli
       `<p>${esc(String(p.summary || ''))}</p><p><b>${p.plan?.items?.length ?? 0}</b> parcels · <b>$${Number(p.plan?.total_usd ?? 0).toFixed(2)}</b> · mode ${esc(String(p.plan?.mode ?? ''))}</p>
 <form method="post" action="/approve/${esc(id)}"><input type="hidden" name="d" value="${d}"><input type="hidden" name="t" value="${esc(q.t || '')}">
 <button style="font-size:16px;padding:10px 18px;border-radius:8px;border:0;background:${d === 'approve' ? '#1a7f37' : '#cf222e'};color:#fff;cursor:pointer">Confirm ${d}</button></form>
-<p><a href="/?role=owner#agents">See every parcel in the plan first</a></p>`));
+<p><a href="/?role=owner#approvals">See every parcel in the plan first</a></p>`));
   });
   fastify.post('/approve/:id', async (req, reply) => {
     const id = (req.params as { id: string }).id;
@@ -366,7 +367,7 @@ export async function createServer(customDb?: LedgerDB, customPayPal?: PayPalCli
     if (!verifyApprovalToken(id, d, form.get('t') || '')) return reply.status(403).type('text/html').send(page('Link not valid', '<p>This approval link is invalid or has been altered.</p>'));
     const r = await decideApproval(agentCtx, id, d === 'approve' ? 'approved' : 'rejected', 'slack-link');
     return reply.type('text/html').send(page(r.ok ? (d === 'approve' ? 'Approved' : 'Rejected') : 'Nothing changed',
-      r.ok ? `<p>Done. The agent ${d === 'approve' ? 'is uploading the tracking now' : 'will not upload anything'}. You can close this tab, or <a href="/?role=owner#agents">open the cockpit</a> to watch it.</p>` : `<p>${esc(r.reason || 'Could not apply that decision.')}</p><p><a href="/?role=owner#agents">Open the cockpit</a></p>`));
+      r.ok ? `<p>Done. The agent ${d === 'approve' ? 'is uploading the tracking now' : 'will not upload anything'}. You can close this tab, or <a href="/?role=owner#approvals">open the cockpit</a> to watch it.</p>` : `<p>${esc(r.reason || 'Could not apply that decision.')}</p><p><a href="/?role=owner#approvals">Open the cockpit</a></p>`));
   });
 
   // --- Health Check for Render ---

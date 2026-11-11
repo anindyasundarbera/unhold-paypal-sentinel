@@ -14,7 +14,7 @@
         document.head.appendChild(l);
       };
       css('/vendor/bryntum/scheduler.css');
-      css('/vendor/bryntum/stockholm-dark.css', 'bryntum-theme');
+      css(themeHref(), 'bryntum-theme');
       const s = document.createElement('script');
       s.src = '/vendor/bryntum/scheduler.umd.js';
       s.onload = resolve;
@@ -23,6 +23,15 @@
     });
     return loaded;
   }
+
+  // Bryntum picks its theme from the <link id="bryntum-theme"> it finds, so the page theme just swaps that link's file.
+  const THEME_BASE = 'https://cdn.jsdelivr.net/npm/@bryntum/scheduler-trial@7.3.8/svalbard-';
+  const themeHref = () => THEME_BASE + (window.U && window.U.isDark() ? 'dark' : 'light') + '.css';
+  function applyTheme() {
+    const link = document.getElementById('bryntum-theme');
+    if (link && link.getAttribute('href') !== themeHref()) link.setAttribute('href', themeHref());
+  }
+  document.addEventListener('unhold:theme', applyTheme);
 
   const money = (v) => '$' + Number(v || 0).toFixed(2);
   const STATE = { in_paypal: 'Tracking in PayPal', seller_has: 'Ready to upload', not_shipped: 'Not shipped', reserve: 'Reserve', unapproved: 'Needs approval' };

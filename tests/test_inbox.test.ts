@@ -74,7 +74,7 @@ describe('Work queues by role', () => {
     assert.deepEqual(kinds('admin'), ['chain', 'connection', 'error', 'failed_run', 'stale']);
 
     assert.equal(roles.owner.headline, '1 plan waiting for your decision');
-    assert.deepEqual(roles.owner.primary, { label: 'Review plan', tab: 'agents' });
+    assert.deepEqual(roles.owner.primary, { label: 'Review plan', tab: 'approvals' });
     assert.match(roles.fulfilment.headline, /^2 parcels to upload/);
     assert.equal(roles.support.headline, '1 dispute to answer');
     assert.equal(roles.admin.todo, 5);

@@ -217,6 +217,8 @@ describe('Cockpit safeguards', () => {
       const server = await createServer(db, fakePayPal);
       assert.equal((await server.inject('/api/summary')).statusCode, 200);
       assert.equal((await server.inject('/api/config')).json().accessCodeRequired, true);
+      const verify = await server.inject({ method: 'POST', url: '/api/audit/verify' });
+      assert.equal(verify.statusCode, 200, 'verifying the audit chain is read-only and must not ask for the code');
 
       const blocked = await server.inject({ method: 'POST', url: '/api/manifests/upload', payload: { orderIds: [] } });
       assert.equal(blocked.statusCode, 401);

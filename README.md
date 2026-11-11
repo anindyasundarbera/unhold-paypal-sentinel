@@ -72,6 +72,7 @@ npm install
 cp .env.example .env      # fill in PayPal sandbox keys and DATABASE_URL (Supabase Postgres)
 npm run build && npm start   # http://localhost:10000
 npm test                  # 71 tests, hermetic: no network, no real credentials, in-memory Postgres
+npm run test:ui           # 23 browser checks that walk every screen and feature (needs Chrome)
 ```
 
 Key environment variables are listed in `.env.example`. Only `DATABASE_URL` and the PayPal sandbox credentials are required; each sponsor integration switches on when its key is set. `AG_GRID_API_KEY` is an AG Grid Enterprise + Charts trial key (the trial in this repo expires 10 Dec 2026; after that the grids keep working with an evaluation watermark).

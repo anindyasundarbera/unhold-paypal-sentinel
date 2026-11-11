@@ -112,7 +112,7 @@ export function buildInbox(input: InboxInput): { items: WorkItem[]; roles: Recor
     items.push({
       id: `approval:${a.id}`, role: 'owner', kind: 'decision', kind_label: 'Plans waiting for your decision', state: 'todo',
       title: a.title, detail: `${plural(a.orders, 'parcel')} · ${a.mode === 'simulated' ? 'demo data, no PayPal call' : 'real PayPal orders'} · nothing is uploaded until you decide`,
-      amount: a.total_usd, due: a.requested_at, tab: 'agents', action: 'Review plan'
+      amount: a.total_usd, due: a.requested_at, tab: 'approvals', action: 'Review plan'
     });
   }
   const uploadable = ready + review;
@@ -121,7 +121,7 @@ export function buildInbox(input: InboxInput): { items: WorkItem[]; roles: Recor
       id: 'opportunity', role: 'owner', kind: 'opportunity', kind_label: 'Money you can release sooner', state: 'todo',
       title: `${plural(uploadable, 'shipped parcel')} ${uploadable === 1 ? 'has' : 'have'} tracking PayPal has not seen`,
       detail: `Uploading it releases the money about ${input.summary.avg_days_sooner} days sooner. The agent can prepare the plan for you to approve.`,
-      amount: Math.round(readyUsd * 100) / 100, due: null, tab: 'agents', action: 'Let the agent plan it'
+      amount: Math.round(readyUsd * 100) / 100, due: null, tab: 'approvals', action: 'Let the agent plan it'
     });
   }
   if (input.summary.health_score < 70) {
@@ -167,7 +167,7 @@ export function buildInbox(input: InboxInput): { items: WorkItem[]; roles: Recor
   for (const a of stale) {
     items.push({
       id: `stale:${a.id}`, role: 'admin', kind: 'stale', kind_label: 'Plans waiting more than a day', state: 'todo',
-      title: a.title, detail: 'No one has decided this plan. It blocks new agent runs until it is approved or rejected.', amount: a.total_usd, due: a.requested_at, tab: 'agents', action: 'Open plan'
+      title: a.title, detail: 'No one has decided this plan. It blocks new agent runs until it is approved or rejected.', amount: a.total_usd, due: a.requested_at, tab: 'approvals', action: 'Open plan'
     });
   }
   for (const a of errorEntries) {
@@ -204,7 +204,7 @@ export function buildInbox(input: InboxInput): { items: WorkItem[]; roles: Recor
       role: 'owner', todo: todo('owner'),
       headline: pending.length ? `${plural(pending.length, 'plan')} waiting for your decision` : uploadable ? `${usd(readyUsd)} can release about ${input.summary.avg_days_sooner} days sooner` : 'Nothing needs a decision',
       sub: `${usd(input.summary.total_withheld_usd)} held across ${plural(input.summary.open_holds_count, 'payment')}`,
-      primary: pending.length ? { label: 'Review plan', tab: 'agents' } : uploadable ? { label: 'Let the agent plan it', tab: 'agents' } : null
+      primary: pending.length ? { label: 'Review plan', tab: 'approvals' } : uploadable ? { label: 'Let the agent plan it', tab: 'approvals' } : null
     },
     fulfilment: {
       role: 'fulfilment', todo: todo('fulfilment'),
