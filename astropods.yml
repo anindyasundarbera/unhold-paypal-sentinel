@@ -11,9 +11,8 @@ spec: blueprint/v1
 name: unhold-agent-team
 
 agent:
-  build:
-    context: .
-    dockerfile: Dockerfile.astropods
+  # Built by .github/workflows/astropods-image.yml (no local Docker needed).
+  image: ghcr.io/anindyasundarbera/unhold-paypal-sentinel:latest
   distributed: false
   interfaces:
     frontend: true
