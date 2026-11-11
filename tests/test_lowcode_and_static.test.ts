@@ -1,16 +1,18 @@
+import './helpers/test_env.js';
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from '../src/server.js';
 import { LedgerDB } from '../src/db/ledger_db.js';
+import { memoryLedger } from './helpers/memory_ledger.js';
 import {
   dispatchZapierEvent,
-  getAstropodsPodSpec,
+  getAstropodsBlueprint,
   queryAstropodsGateway
 } from '../src/engine/lowcode_dispatcher.js';
 
-describe('Step 6 & 7: Static UI Wireframes & Low-Code Integrations', () => {
+describe('Step 6 & 7: Static UI Wireframes & Low-Code Integrations', async () => {
   test('Fastify serves static wireframes at root /, /cockpit, and /deck', async () => {
-    const db = new LedgerDB(':memory:');
+    const db = await memoryLedger();
     const server = await createServer(db);
 
     // Root GET /
@@ -50,22 +52,12 @@ describe('Step 6 & 7: Static UI Wireframes & Low-Code Integrations', () => {
     await server.close();
   });
 
-  test('Astropods Pod Spec returns valid declarative multi-agent pod manifest', async () => {
-    const spec = getAstropodsPodSpec();
-    assert.equal(spec.version, '1.0');
-    assert.equal(spec.pod.id, 'unhold-paypal-sentinel');
-    assert.equal(spec.team.agents.length, 6);
-
-    const agentIds = spec.team.agents.map((a) => a.id);
-    assert.ok(agentIds.includes('agt-ledger-scribe'));
-    assert.ok(agentIds.includes('agt-cashflow-strategist'));
-    assert.ok(agentIds.includes('agt-tracking-matcher'));
-    assert.ok(agentIds.includes('agt-safe-to-ship'));
-    assert.ok(agentIds.includes('agt-dispute-negotiator'));
-    assert.ok(agentIds.includes('agt-audit-officer'));
-
-    assert.ok(spec.integrations.paypal.apis.length >= 5);
-    assert.equal(spec.integrations.ag_grid.component, 'AG Grid Community 34.3.1');
+  test('Astropods blueprint is the real blueprint/v1 spec for the agent team', async () => {
+    const bp = getAstropodsBlueprint();
+    assert.equal(bp.spec, 'blueprint/v1');
+    assert.equal(bp.name, 'unhold-agent-team');
+    assert.ok(bp.yaml && bp.yaml.includes('frontend: true'), 'frontend agent served on port 80');
+    assert.ok(bp.yaml && bp.yaml.includes('provider: postgres'), 'binds the shared Supabase knowledge store');
   });
 
   test('Astropods Gateway queries AI endpoint or returns local fallback', async () => {
@@ -93,7 +85,7 @@ describe('Step 6 & 7: Static UI Wireframes & Low-Code Integrations', () => {
   });
 
   test('Fastify Low-Code REST endpoints return valid responses', async () => {
-    const db = new LedgerDB(':memory:');
+    const db = await memoryLedger();
     const server = await createServer(db);
 
     // GET /api/lowcode/astropods/spec
@@ -103,7 +95,8 @@ describe('Step 6 & 7: Static UI Wireframes & Low-Code Integrations', () => {
     });
     assert.equal(specRes.statusCode, 200);
     const specData = JSON.parse(specRes.payload);
-    assert.equal(specData.pod.id, 'unhold-paypal-sentinel');
+    assert.equal(specData.spec, 'blueprint/v1');
+    assert.equal(specData.name, 'unhold-agent-team');
 
     // POST /api/lowcode/astropods/query
     const queryRes = await server.inject({

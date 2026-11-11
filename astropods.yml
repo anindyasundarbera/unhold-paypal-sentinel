@@ -1,59 +1,119 @@
-version: "1.0"
-pod:
-  id: "unhold-paypal-sentinel"
-  name: "Unhold Autonomous Cash-Flow & Payment Protection Pod"
-  description: "Autonomous multi-agent system resolving PayPal seller holds, tracking uploads, and dispute defense"
-  runtime: "nodejs-20"
-  port: 10000
-  entrypoint: "dist/server.js"
-  health_check: "/health"
+# Unhold agent team as an Astropods blueprint (spec blueprint/v1, RFC-1 v1.9).
+#
+#   ast spec validate
+#   ast blueprint push unhold-agent-team
+#   ast blueprint deploy unhold-agent-team --vars-file .env.astropods
+#
+# The agent ships its own AG Grid cockpit (frontend agent, served on port 80). Astropods puts sign-in
+# in front of it, injects OpenTelemetry settings so every agent step shows up as a trace in the
+# Astropods monitor, and binds the shared Supabase "basestore" knowledge store as the ledger.
+spec: blueprint/v1
+name: unhold-agent-team
 
-team:
-  agents:
-    - id: "agt-ledger-scribe"
-      name: "Ledger Scribe"
-      role: "Rebuilds and reconciles 106 PayPal holds using T2107/T2108 event code pairing"
-      endpoint: "GET /api/holds"
-    - id: "agt-cashflow-strategist"
-      name: "Cash-Flow Strategist"
-      role: "Builds hold waterfall, 6-driver breakdown, and 2,000-run Monte Carlo forecaster"
-      endpoint: "GET /api/waterfall"
-    - id: "agt-tracking-matcher"
-      name: "AI Tracking Matcher"
-      role: "3-tier carrier manifest matching and idempotent PayPal tracking uploader"
-      endpoint: "POST /api/manifests/upload"
-    - id: "agt-safe-to-ship"
-      name: "Payment Guard Gatekeeper"
-      role: "Inbound email phishing auditor and pre-flight Seller Protection verifier"
-      endpoint: "POST /api/payment-guard/verify-email"
-    - id: "agt-dispute-negotiator"
-      name: "Dispute Defense & A2A Negotiator"
-      role: "Untrusted prompt injection defense and 4-turn RFC 9901 SD-JWT autonomous settlement"
-      endpoint: "POST /api/disputes/{id}/negotiate"
-    - id: "agt-audit-officer"
-      name: "Tamper-Evident Audit Officer"
-      role: "Maintains SHA-256 cryptographic hash chain verifying all state transitions"
-      endpoint: "GET /api/audit"
+agent:
+  # Built by .github/workflows/astropods-image.yml (no local Docker needed).
+  image: ghcr.io/anindyasundarbera/unhold-paypal-sentinel:5008577824e25852cf3493e2b87a3b21975aee17
+  distributed: false
+  interfaces:
+    frontend: true
+    messaging: false
+  healthcheck:
+    path: /healthz
+  inputs:
+    - name: NODE_ENV
+      datatype: string
+      default: production
+    - name: PORT
+      datatype: string
+      default: "80"
+      description: Must be 80 for a frontend agent in production.
+    - name: HOST
+      datatype: string
+      default: 0.0.0.0
+    - name: LOG_LEVEL
+      datatype: string
+      default: info
+    - name: PUBLIC_BASE_URL
+      datatype: string
+      description: Public https URL of this agent. Used in approval links and by the Kernel carrier check.
+    - name: PAYPAL_ENVIRONMENT
+      datatype: string
+      default: sandbox
+    - name: PAYPAL_CLIENT_ID
+      datatype: string
+    - name: PAYPAL_CLIENT_SECRET
+      datatype: string
+      secret: true
+    - name: PAYPAL_WEBHOOK_ID
+      datatype: string
+      optional: true
+    - name: LLM_PROVIDER_ENDPOINT
+      datatype: string
+      default: https://ollama.com/v1
+    - name: LLM_PROVIDER_MODEL
+      datatype: string
+      default: deepseek-v4.1-flash:1017
+    - name: LLM_API_KEY
+      datatype: string
+      secret: true
+    - name: ZAPIER_WEBHOOK_URL
+      datatype: string
+      secret: true
+      description: Zapier catch hook that receives agent events (approval requests, run results, alerts).
+    - name: ZAPIER_MCP_URL
+      datatype: string
+      optional: true
+    - name: ZAPIER_MCP_KEY
+      datatype: string
+      secret: true
+      optional: true
+    - name: SLACK_APPROVAL_CHANNEL
+      datatype: string
+      optional: true
+    - name: INGEST_SHARED_SECRET
+      datatype: string
+      secret: true
+      description: Shared secret Zapier sends in x-unhold-secret to ingest manifests and start runs.
+    - name: COCKPIT_ACCESS_CODE
+      datatype: string
+      secret: true
+      optional: true
+      description: When set, every change made from the cockpit needs this code. Reading stays open.
+    - name: DATABASE_URL
+      datatype: string
+      secret: true
+      optional: true
+      description: Supabase Postgres connection string. Set it to share the same ledger as the Render service; when empty the bound knowledge store (POSTGRES_*) is used.
+    - name: ELASTIC_URL
+      datatype: string
+      optional: true
+    - name: ELASTIC_API_KEY
+      datatype: string
+      secret: true
+      optional: true
+    - name: KERNEL_API_KEY
+      datatype: string
+      secret: true
+      optional: true
+    - name: CHANNEL3_API_KEY
+      datatype: string
+      secret: true
+      optional: true
+    - name: AG_GRID_API_KEY
+      datatype: string
+      secret: true
+      optional: true
 
-integrations:
-  paypal:
-    environment: "sandbox"
-    apis:
-      - "POST /v2/checkout/orders/{id}/track"
-      - "GET /v2/checkout/orders/{id}"
-      - "GET /v2/payments/captures/{id}"
-      - "GET /v1/reporting/transactions"
-      - "GET /v1/reporting/balances"
-      - "POST /v1/notifications/verify-webhook-signature"
-  zapier:
-    webhook_enabled: true
-    events:
-      - "tracking.batch_uploaded"
-      - "dispute.settled"
-      - "payment.fraud_detected"
-  ag_grid:
-    component: "AG Grid Community 34.3.1"
-    license_type: "enterprise-trial"
-  render:
-    blueprint: "render.yaml"
-    service_type: "web"
+# The Supabase Postgres connected to the account (the "basestore" knowledge store). Choose Shared at
+# deploy time. The platform injects POSTGRES_HOST / PORT / USER / PASSWORD / DB; Unhold builds its
+# connection string from them when DATABASE_URL is not set.
+knowledge:
+  ledger:
+    provider: postgres
+
+dev:
+  interfaces:
+    frontend:
+      port: 3000
+  command: node --env-file=.env dist/server.js
+  watch: [dist, public]

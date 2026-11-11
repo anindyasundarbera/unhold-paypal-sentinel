@@ -1,22 +1,24 @@
+import './helpers/test_env.js';
 import { test, describe, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from '../src/server.js';
 import { LedgerDB } from '../src/db/ledger_db.js';
+import { memoryLedger } from './helpers/memory_ledger.js';
 import type { FastifyInstance } from 'fastify';
 
-describe('Render Fastify Web Service Endpoints', () => {
+describe('Render Fastify Web Service Endpoints', async () => {
   let server: FastifyInstance;
   let db: LedgerDB;
 
   before(async () => {
     process.env.NODE_ENV = 'test';
-    db = new LedgerDB(':memory:');
+    db = await memoryLedger();
     server = await createServer(db);
   });
 
   after(async () => {
     await server.close();
-    db.close();
+    await db.close();
   });
 
   test('GET /health returns 200 with service identification', async () => {

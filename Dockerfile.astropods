@@ -1,0 +1,28 @@
+# Image for the Astropods blueprint (astropods.yml). A frontend agent must serve HTTP on port 80.
+FROM node:24-slim AS builder
+WORKDIR /app
+COPY package*.json tsconfig.json ./
+RUN npm ci
+COPY src/ ./src/
+RUN npm run build
+
+FROM node:24-slim AS runner
+WORKDIR /app
+
+# curl for the platform health check. Runs as root so it can bind port 80: file capabilities
+# (setcap) make exec fail with "Operation not permitted" under Kubernetes.
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends curl \
+  && rm -rf /var/lib/apt/lists/*
+
+ENV NODE_ENV=production
+ENV PORT=80
+ENV HOST=0.0.0.0
+
+COPY package*.json ./
+RUN npm ci --omit=dev
+COPY --from=builder /app/dist ./dist
+COPY public/ ./public/
+COPY astropods.yml ./astropods.yml
+EXPOSE 80
+CMD ["node", "dist/server.js"]

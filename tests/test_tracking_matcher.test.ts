@@ -1,6 +1,8 @@
+import './helpers/test_env.js';
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import { LedgerDB } from '../src/db/ledger_db.js';
+import { memoryLedger } from './helpers/memory_ledger.js';
 import { seedLedger } from '../src/seed/seeder.js';
 import { PayPalClient } from '../src/paypal/client.js';
 import {
@@ -16,8 +18,8 @@ import type { CarrierManifestRecord, HoldRecord } from '../src/types/ledger.js';
 
 process.env.NODE_ENV = 'test';
 
-describe('Step 3: AI Tracking Matcher & Batch Uploader', () => {
-  test('levenshtein distance and nickname token matching', () => {
+describe('Step 3: AI Tracking Matcher & Batch Uploader', async () => {
+  test('levenshtein distance and nickname token matching', async () => {
     assert.equal(levenshteinDistance('Okafor', 'Okafor'), 0);
     assert.equal(levenshteinDistance('Okafor', 'Okaffor'), 1);
     assert.equal(levenshteinDistance('Lindqvist', 'Lindqvsit'), 1); // transposition
@@ -34,10 +36,10 @@ describe('Step 3: AI Tracking Matcher & Batch Uploader', () => {
     assert.equal(inverted.last, 'okafor');
   });
 
-  test('Tier 1: Exact ID matching', () => {
-    const db = new LedgerDB(':memory:');
-    seedLedger(db);
-    const speedable = db.getSpeedableHolds();
+  test('Tier 1: Exact ID matching', async () => {
+    const db = await memoryLedger();
+    await seedLedger(db);
+    const speedable = await db.getSpeedableHolds();
     const targetHold = speedable[0];
 
     const manifest: CarrierManifestRecord = {
@@ -62,10 +64,10 @@ describe('Step 3: AI Tracking Matcher & Batch Uploader', () => {
     assert.equal(match.decision, 'auto');
     assert.ok(match.days_sooner > 0);
 
-    db.close();
+    await db.close();
   });
 
-  test('Tier 2 & 3: Deterministic Rule and AI Fuzzy matching', () => {
+  test('Tier 2 & 3: Deterministic Rule and AI Fuzzy matching', async () => {
     const hold: HoldRecord = {
       id: 'HOLD-TEST-100',
       txn_id: 'TXN-TEST-100',
@@ -152,11 +154,11 @@ describe('Step 3: AI Tracking Matcher & Batch Uploader', () => {
     assert.equal(typoMatch.confidence, 0.88);
   });
 
-  test('batch matching matches all 38 manifests with $1,869.39 potential acceleration', () => {
-    const db = new LedgerDB(':memory:');
-    seedLedger(db);
-    const manifests = db.getAllManifests();
-    const holds = db.getAllHolds();
+  test('batch matching matches all 38 manifests with $1,869.39 potential acceleration', async () => {
+    const db = await memoryLedger();
+    await seedLedger(db);
+    const manifests = await db.getAllManifests();
+    const holds = await db.getAllHolds();
 
     assert.equal(manifests.length, 38);
     const result = matchAllManifests(manifests, holds);
@@ -166,12 +168,12 @@ describe('Step 3: AI Tracking Matcher & Batch Uploader', () => {
     assert.ok(result.auto_count >= 36);
     assert.equal(result.total_potential_acceleration_usd, 1869.39);
 
-    db.close();
+    await db.close();
   });
 
   test('executes batch tracking upload, re-dates holds, updates health score to 73, and audits chain', async () => {
-    const db = new LedgerDB(':memory:');
-    seedLedger(db);
+    const db = await memoryLedger();
+    await seedLedger(db);
 
     const paypal = new PayPalClient({
       clientId: 'sandbox_client',
@@ -180,7 +182,7 @@ describe('Step 3: AI Tracking Matcher & Batch Uploader', () => {
     });
 
     // Baseline check
-    const summaryBefore = db.getSummary();
+    const summaryBefore = await db.getSummary();
     assert.equal(summaryBefore.health_score, 53);
     assert.equal(summaryBefore.health_band, 'At risk');
     assert.equal(summaryBefore.speedable_holds_count, 38);
@@ -193,7 +195,7 @@ describe('Step 3: AI Tracking Matcher & Batch Uploader', () => {
     assert.equal(dryRunReport.avg_days_saved, 12.4);
 
     // Ledger should remain untouched after dry run
-    assert.equal(db.getSpeedableHolds().length, 38);
+    assert.equal((await db.getSpeedableHolds()).length, 38);
 
     // 2. Real Batch Upload execution
     const liveReport = await executeBatchTrackingUpload(db, paypal, { autoOnly: true });
@@ -204,23 +206,23 @@ describe('Step 3: AI Tracking Matcher & Batch Uploader', () => {
     assert.equal(liveReport.health_score_after, 73);
 
     // Speedable holds in 'seller_has' status should now be 0
-    const remainingSpeedable = db.getSpeedableHolds();
+    const remainingSpeedable = await db.getSpeedableHolds();
     assert.equal(remainingSpeedable.length, 0);
 
     // Verify all 38 holds are re-dated to their expedited release date (wi_date)
-    const allHolds = db.getAllHolds();
+    const allHolds = await db.getAllHolds();
     const uploadedHolds = allHolds.filter((h) => h.uploaded && h.status === 'in_paypal');
     assert.ok(uploadedHolds.length >= 38);
 
     // Verify Account Health Score jumped to 73 ("Fair")
-    const summaryAfter = db.getSummary();
+    const summaryAfter = await db.getSummary();
     assert.equal(summaryAfter.health_score, 73);
     assert.equal(summaryAfter.health_band, 'Fair');
 
     // Verify SHA-256 tamper-evident audit chain integrity
-    const auditChain = db.getAuditChain();
+    const auditChain = await db.getAuditChain();
     assert.ok(auditChain.length >= 38);
-    const auditVerify = db.verifyLedgerAuditChain();
+    const auditVerify = await db.verifyLedgerAuditChain();
     assert.equal(auditVerify.valid, true);
 
     // 3. Test Idempotency: second run produces ALREADY_UPLOADED with 0 new uploads
@@ -228,13 +230,13 @@ describe('Step 3: AI Tracking Matcher & Batch Uploader', () => {
     assert.equal(secondReport.total_uploaded, 0);
     assert.equal(secondReport.total_already_uploaded, 38);
 
-    db.close();
+    await db.close();
   });
 
   test('Fastify server endpoints POST /api/manifests/match and POST /api/manifests/upload', async () => {
     process.env.NODE_ENV = 'test';
-    const db = new LedgerDB(':memory:');
-    seedLedger(db);
+    const db = await memoryLedger();
+    await seedLedger(db);
     const server = await createServer(db);
 
     // 1. Test POST /api/manifests/match
@@ -281,6 +283,6 @@ describe('Step 3: AI Tracking Matcher & Batch Uploader', () => {
     assert.equal(summaryData.health_band, 'Fair');
 
     await server.close();
-    db.close();
+    await db.close();
   });
 });

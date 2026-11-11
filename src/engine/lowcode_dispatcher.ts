@@ -21,44 +21,6 @@ export interface ZapierDispatchResult {
   dispatched_at: string;
 }
 
-export interface AstropodsSpec {
-  version: string;
-  pod: {
-    id: string;
-    name: string;
-    description: string;
-    runtime: string;
-    port: number;
-    health_check: string;
-  };
-  team: {
-    agents: Array<{
-      id: string;
-      name: string;
-      role: string;
-      endpoint: string;
-    }>;
-  };
-  integrations: {
-    paypal: {
-      environment: string;
-      apis: string[];
-    };
-    zapier: {
-      webhook_enabled: boolean;
-      events: string[];
-    };
-    ag_grid: {
-      component: string;
-      license_type: string;
-    };
-    render: {
-      blueprint: string;
-      service_type: string;
-    };
-  };
-}
-
 /**
  * Dispatches an outbound webhook event to Zapier when configured.
  * Uses native fetch with timeout and error tolerance.
@@ -87,10 +49,10 @@ export async function dispatchZapierEvent(
     slackMessage = [
       ':white_check_mark: *[UNHOLD] Cash Acceleration Executed*',
       '*Merchant:* Apex Home Goods (`SANDBOXSELLER01`)',
-      `• *Accelerated Cash Release:* $${Number(d.total_usd_accelerated || 1869.39).toFixed(2)} USD`,
-      `• *Orders Uploaded to PayPal:* ${d.total_uploaded || 38} orders`,
-      `• *Average Release Advance:* ${d.avg_days_saved || 12.4} days sooner`,
-      `• *Account Health Score:* ${d.health_score_before || 53} ➔ *${d.health_score_after || 73} / 100* (Fair)`,
+      `• *Accelerated Cash Release:* $${Number(d.total_usd_accelerated ?? 0).toFixed(2)} USD`,
+      `• *Orders Uploaded to PayPal:* ${d.total_uploaded ?? 0} orders`,
+      `• *Average Release Advance:* ${d.avg_days_saved ?? 0} days sooner`,
+      `• *Account Health Score:* ${d.health_score_before ?? '—'} ➔ *${d.health_score_after ?? '—'} / 100*`,
       `• *Audit Status:* Signed into SHA-256 Tamper-Evident Ledger`,
       '_Actions autonomously executed by AI Tracking Matcher & PayPal Orders v2 API._'
     ].join('\n');
@@ -98,22 +60,43 @@ export async function dispatchZapierEvent(
     const d = payload.data || {};
     slackMessage = [
       ':handshake: *[UNHOLD] Autonomous A2A Dispute Settled*',
-      `*Dispute ID:* ${d.dispute_id || 'DISP-SEED-001'} · *Order:* ${d.order_id || 'ORD-789012'}`,
+      `*Dispute ID:* ${d.dispute_id ?? '—'} · *Order:* ${d.order_id ?? '—'}`,
       '• *Resolution Protocol:* Agent-to-Agent Autonomous Settlement',
       '• *Evidence Attached:* RFC 9901 SD-JWT Cryptographic Delivery Proof (ES256)',
-      `• *Customer Courtesy:* $${Number(d.concession_amount_usd || 10).toFixed(2)} store credit (${d.coupon_code || 'ASSURE-CARE-1000'})`,
+      `• *Customer Courtesy:* $${Number(d.concession_amount_usd ?? 0).toFixed(2)} store credit (${d.coupon_code ?? '—'})`,
       '• *Result:* Dispute withdrawn amicably by buyer agent; merchant funds released'
     ].join('\n');
   } else if (payload.event === 'payment.fraud_detected') {
     const d = payload.data || {};
     slackMessage = [
       ':rotating_light: *[UNHOLD SECURITY ALERT] Phishing Scam Blocked*',
-      `*Transaction Ref:* \`${d.transaction_id || 'CAP-FAKE-PHISHING-001'}\``,
-      `• *Claimed Notice Amount:* $${Number(d.claimed_amount || 820).toFixed(2)} USD`,
-      `• *Threat Detection:* ${d.reason || 'Capture not found on PayPal (404)'}`,
+      `*Transaction Ref:* \`${d.transaction_id ?? '—'}\``,
+      `• *Claimed Notice Amount:* $${Number(d.claimed_amount ?? 0).toFixed(2)} USD`,
+      `• *Threat Detection:* ${d.reason ?? 'Capture not found on PayPal'}`,
       '• *Domain Legitimacy:* Spoofed sender domain detected',
       '• *Merchant Protective Action:* HALT SHIPMENT IMMEDIATELY · Counterfeit receipt'
     ].join('\n');
+  } else if (payload.event === 'agent.approval_requested') {
+    const d = payload.data || {};
+    slackMessage = [
+      ':raising_hand: *[UNHOLD] Approval needed*',
+      `*${d.title ?? 'Agent plan'}*`,
+      `• *Orders:* ${d.orders ?? 0} · *Cash affected:* $${Number(d.total_usd ?? 0).toFixed(2)} · *Avg release advance:* ${d.avg_days_saved ?? 0} days`,
+      `• *Agent summary:* ${d.summary ?? '—'}`,
+      `<${d.approve_url}|:white_check_mark: Approve> · <${d.reject_url}|:x: Reject>${d.cockpit_url ? ` · <${d.cockpit_url}|See every parcel in Unhold>` : ''}`,
+      `_Run \`${d.run_id ?? '—'}\` · nothing moves until you approve._`
+    ].join('\n');
+  } else if (payload.event === 'agent.run_completed' || payload.event === 'agent.run_failed' || payload.event === 'agent.run_rejected') {
+    const d = payload.data || {};
+    const icon = payload.event === 'agent.run_completed' ? ':white_check_mark:' : payload.event === 'agent.run_failed' ? ':rotating_light:' : ':no_entry:';
+    slackMessage = [
+      `${icon} *[UNHOLD] Agent run ${String(payload.event).replace('agent.run_', '')}*`,
+      `• *Run:* \`${d.run_id ?? '—'}\` · *Goal:* ${d.goal ?? '—'} · *Mode:* ${d.mode ?? '—'}`,
+      `• *Outcome:* ${d.summary ?? d.error ?? '—'}`
+    ].join('\n');
+  } else if (payload.event === 'agent.morning_brief') {
+    const d = payload.data || {};
+    slackMessage = [':sunrise: *[UNHOLD] Morning brief*', String(d.summary ?? '—')].join('\n');
   } else {
     slackMessage = [
       ':rocket: *[UNHOLD] Live System Alert*',
@@ -131,6 +114,9 @@ export async function dispatchZapierEvent(
     merchant: 'Apex Home Goods (SANDBOXSELLER01)',
     slack_title: `Unhold Alert: ${payload.event}`,
     slack_message: slackMessage,
+    run_id: (payload.data as Record<string, unknown>)?.run_id,
+    approve_url: (payload.data as Record<string, unknown>)?.approve_url,
+    reject_url: (payload.data as Record<string, unknown>)?.reject_url,
     data: payload.data
   };
 
@@ -170,85 +156,23 @@ export async function dispatchZapierEvent(
 }
 
 /**
- * Returns the declarative Astropods Pod specification for Unhold.
+ * The real Astropods blueprint (astropods.yml, spec blueprint/v1) this service is packaged as.
+ * Served so a reviewer can see exactly what `ast blueprint push` publishes.
  */
-export function getAstropodsPodSpec(): AstropodsSpec {
-  return {
-    version: '1.0',
-    pod: {
-      id: 'unhold-paypal-sentinel',
-      name: 'Unhold Autonomous Cash-Flow & Payment Protection Pod',
-      description: 'Autonomous multi-agent system resolving PayPal seller holds, tracking uploads, and dispute defense',
-      runtime: 'nodejs-20',
-      port: Number(process.env.PORT || 10000),
-      health_check: '/health'
-    },
-    team: {
-      agents: [
-        {
-          id: 'agt-ledger-scribe',
-          name: 'Ledger Scribe',
-          role: 'Rebuilds and reconciles 106 PayPal holds using T2107/T2108 event code pairing',
-          endpoint: 'GET /api/holds'
-        },
-        {
-          id: 'agt-cashflow-strategist',
-          name: 'Cash-Flow Strategist',
-          role: 'Builds hold waterfall, 6-driver breakdown, and 2,000-run Monte Carlo forecaster',
-          endpoint: 'GET /api/waterfall'
-        },
-        {
-          id: 'agt-tracking-matcher',
-          name: 'AI Tracking Matcher',
-          role: '3-tier carrier manifest matching and idempotent PayPal tracking uploader',
-          endpoint: 'POST /api/manifests/upload'
-        },
-        {
-          id: 'agt-safe-to-ship',
-          name: 'Payment Guard Gatekeeper',
-          role: 'Inbound email phishing auditor and pre-flight Seller Protection verifier',
-          endpoint: 'POST /api/payment-guard/verify-email'
-        },
-        {
-          id: 'agt-dispute-negotiator',
-          name: 'Dispute Defense & A2A Negotiator',
-          role: 'Untrusted prompt injection defense and 4-turn RFC 9901 SD-JWT autonomous settlement',
-          endpoint: 'POST /api/disputes/{id}/negotiate'
-        },
-        {
-          id: 'agt-audit-officer',
-          name: 'Tamper-Evident Audit Officer',
-          role: 'Maintains SHA-256 cryptographic hash chain verifying all state transitions',
-          endpoint: 'GET /api/audit'
-        }
-      ]
-    },
-    integrations: {
-      paypal: {
-        environment: (process.env.PAYPAL_ENVIRONMENT as string) || 'sandbox',
-        apis: [
-          'POST /v2/checkout/orders/{id}/track',
-          'GET /v2/checkout/orders/{id}',
-          'GET /v2/payments/captures/{id}',
-          'GET /v1/reporting/transactions',
-          'GET /v1/reporting/balances',
-          'POST /v1/notifications/verify-webhook-signature'
-        ]
-      },
-      zapier: {
-        webhook_enabled: !!process.env.ZAPIER_WEBHOOK_URL,
-        events: ['tracking.batch_uploaded', 'dispute.settled', 'payment.fraud_detected']
-      },
-      ag_grid: {
-        component: 'AG Grid Community 34.3.1',
-        license_type: 'enterprise-trial'
-      },
-      render: {
-        blueprint: 'render.yaml',
-        service_type: 'web'
-      }
+export function getAstropodsBlueprint(): { file: string; spec: string | null; name: string | null; yaml: string | null } {
+  const candidates = [join(__dirname, '../../astropods.yml'), join(process.cwd(), 'astropods.yml')];
+  for (const p of candidates) {
+    if (existsSync(p)) {
+      const yaml = readFileSync(p, 'utf8');
+      return {
+        file: 'astropods.yml',
+        spec: yaml.match(/^spec:\s*(\S+)/m)?.[1] ?? null,
+        name: yaml.match(/^name:\s*(\S+)/m)?.[1] ?? null,
+        yaml
+      };
     }
-  };
+  }
+  return { file: 'astropods.yml', spec: null, name: null, yaml: null };
 }
 
 /**

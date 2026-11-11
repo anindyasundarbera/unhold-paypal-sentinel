@@ -9,13 +9,15 @@
     "node": ">=22.5.0"
   },
   "scripts": {
-    "start": "node --experimental-sqlite dist/server.js",
-    "sweep": "node --experimental-sqlite dist/cron/reconcile_sweep.js",
+    "start": "node dist/server.js",
+    "sweep": "node dist/cron/reconcile_sweep.js",
     "render:diagnose": "tsx scripts/render_cli.ts",
     "build": "tsc && cp src/seed/unhold_seed.json dist/seed/",
-    "test": "tsx --test tests/*.test.ts",
+    "test": "NODE_ENV=test tsx --test tests/test_*.test.ts",
     "register-webhook": "tsx src/paypal/register_webhook.ts",
-    "dev": "tsx watch src/index.ts"
+    "seed:live": "tsx --env-file=.env scripts/seed_live_orders.ts",
+    "dev": "tsx watch src/index.ts",
+    "test:ui": "NODE_ENV=test tsx tests/ui_parity.ts"
   },
   "keywords": [
     "paypal",
@@ -29,6 +31,7 @@
   "license": "MIT",
   "devDependencies": {
     "@types/node": "^24.19.2",
+    "pg-mem": "^3.0.14",
     "puppeteer-core": "^25.16.0",
     "tsx": "^4.23.15",
     "typescript": "^5.9.3"
@@ -36,6 +39,11 @@
   "dependencies": {
     "@fastify/cors": "^11.4.1",
     "@fastify/static": "^10.1.10",
+    "@opentelemetry/api": "^1.10.0",
+    "@opentelemetry/exporter-trace-otlp-http": "^0.301.1",
+    "@opentelemetry/resources": "^3.1.1",
+    "@opentelemetry/sdk-node": "^0.301.1",
+    "@opentelemetry/semantic-conventions": "^1.45.0",
     "@types/pg": "^8.23.1",
     "fastify": "^5.12.8",
     "pg": "^8.23.1"

@@ -1,170 +1,91 @@
-# Unhold: Autonomous Cash-Flow & Payment Protection for PayPal Sellers
+# Unhold: an agent team that releases held PayPal money sooner
 
-> **Unhold** is an autonomous AI agent team and FinTech observability flight deck that keeps PayPal merchants' cash moving. It continuously monitors payment holds, diagnoses why funds are withheld using PayPal’s exact accounting event codes (`T2107`/`T2108`), matches shipping manifests to unlock funds weeks sooner, blocks fake payment scams, and negotiates agent-to-agent disputes using cryptographic delivery proofs.
+When a PayPal seller's sales jump, PayPal can hold the money for up to 21 days. Tracking uploaded to PayPal lets it release about 24 hours after delivery, but sellers rarely send it back. **Unhold** finds the held payments, explains why, matches carrier manifests to orders, asks a person to approve, uploads the tracking to PayPal, and checks that it worked.
 
-[![Tests](https://img.shields.io/badge/tests-65%2F65%20passing-brightgreen)](#)
-[![Quality Gates](https://img.shields.io/badge/quality%20gates-G0..G8%20verified-blue)](#)
-[![RFC 9901](https://img.shields.io/badge/RFC%209901-SD--JWT%20ES256-purple)](#)
-[![PayPal APIs](https://img.shields.io/badge/PayPal-Orders%20v2%20%7C%20Captures%20%7C%20Disputes-003087)](#)
-[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/anindyasundarbera/unhold-paypal-sentinel)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
----
+## What is real and what is simulated
 
-## 📖 Live Web Interfaces
+| | Status |
+|---|---|
+| Tracking upload (`POST /v2/checkout/orders/{id}/track`), order lookups, webhooks | **Real PayPal sandbox calls.** Four demo orders were paid by a sandbox buyer; each carries a tracker created by the app. |
+| Seller hold history (106 holds, $5,235.24) | **Simulated.** The PayPal sandbox cannot create seller holds, so history is seeded and the cockpit says "Simulated seller history". Holds with no real PayPal order cannot be uploaded live. |
+| Carrier tracking pages | A clearly labelled **demo carrier page**, because real carriers don't know synthetic tracking numbers. |
+| Everything else (ledger, agents, approvals, search, logs) | Real, running on Supabase Postgres. |
 
-- **Merchant Cockpit (`/` or `/cockpit`):** Interactive dashboard featuring local AG Grid Community 34.3.1, real-time KPI metrics, Hold Waterfall release schedule, and 1-click batch upload actions.
-- **Technical & Software Documentation (`/doc` or `/docs`):** 22-section deep architecture manual covering the 7-stage loop, Monte Carlo Cash Twin math, 3-tier matcher, RFC 9901 SD-JWT, and the 3 Zapier Slack alert moments.
-- **14-Slide Presentation Deck (`/deck`):** Complete slide deck preserving all reviewer notes, architectural diagrams, and FinTech mechanics.
+## The agent team
 
----
+A **Supervisor** runs `perceive → reason → plan → ask → (human approves) → act → verify → learn`, with three specialists:
 
-## 1. System Architecture
+| Agent | Job |
+|---|---|
+| Cash-flow | Finds matched parcels, builds the upload plan, uploads tracking |
+| Payment Guard | Confirms each order is real on PayPal, checks price against the product catalog, reads trackers back after uploading |
+| Buyer Assurance | Scans disputes and neutralises prompt-injection attempts in buyer messages |
 
-```
-   [ Merchant Shipping CSVs / Inboxes ]            [ Real PayPal Sandbox ]
-                     │                                         │
-                     ▼                                         ▼
-   ┌───────────────────────────────────┐     ┌───────────────────────────────────┐
-   │         ZAPIER (Low-Code)         │     │    RENDER CLOUD (Always-On)       │
-   │  - Email ingestion (scam alerts)  │     │  - Fastify Webhook Ingest (HTTPS) │
-   │  - Merchant Slack notifications   │     │  - Render Workflows (Sweeps)      │
-   │  - Approval request callbacks     │     │  - Managed PostgreSQL Ledger      │
-   └─────────────────┬─────────────────┘     └─────────────────┬─────────────────┘
-                     │                                         │
-                     ▼                                         ▼
-   ┌─────────────────────────────────────────────────────────────────────────────┐
-   │                      ASTROPODS (AI Agent Runtime)                           │
-   │                                                                             │
-   │   ┌─────────────────────────────────────────────────────────────────────┐   │
-   │   │                         SUPERVISOR AGENT                            │   │
-   │   │     Orchestrates specialists, settles debates, writes briefs        │   │
-   │   └───────────────┬──────────────────┬──────────────────┬───────────────┘   │
-   │                   │                  │                  │                   │
-   │                   ▼                  ▼                  ▼                   │
-   │         ┌──────────────────┐ ┌───────────────┐ ┌──────────────────┐        │
-   │         │ CASH-FLOW AGENT  │ │BUYER ASSURANCE│ │  PAYMENT GUARD   │        │
-   │         │ - Hold waterfall │ │- Dispute A2A  │ │- Phishing verify │        │
-   │         │ - Monte Carlo twin│ │- SD-JWT proof│ │- Pre-flight check│        │
-   │         │ - Trk AI matcher │ │- Prompt shield│ │- $750+ sig rule  │        │
-   │         └─────────┬────────┘ └───────┬───────┘ └────────┬─────────┘        │
-   │                   │                  │                  │                   │
-   │                   └──────────────────┼──────────────────┘                   │
-   │                                      ▼                                      │
-   │   ┌─────────────────────────────────────────────────────────────────────┐   │
-   │   │                      DETERMINISTIC GUARDRAILS                       │   │
-   │   │  - Math Validator: Rejects any LLM output with unverified numbers   │   │
-   │   │  - Policy Engine: No money moves without human 1-click approval     │   │
-   │   │  - SHA-256 Audit Chain: Tamper-evident cryptographic ledger         │   │
-   │   └─────────────────────────────────────────────────────────────────────┘   │
-   └──────────────────────────────────────┬──────────────────────────────────────┘
-                                          │
-                                          ▼
-   ┌─────────────────────────────────────────────────────────────────────────────┐
-   │                    AG STUDIO & AG GRID (The Cockpit)                        │
-   │  - Hold Waterfall Chart & Monte Carlo release range (AG Studio widget)      │
-   │  - High-density Holds Ledger with timeline cell renderers (AG Grid)         │
-   │  - AI Tracking Matcher review drawer & interactive approval actions         │
-   │  - Live Cryptographic Audit Chain verifier                                  │
-   └─────────────────────────────────────────────────────────────────────────────┘
-```
+Rules the code enforces: **no upload without an approval** (signed one-click links; a decision counts once); **the model explains, code decides** (the policy chooses what may be proposed, and model text is rejected if it contains a figure the tools did not return, with a deterministic fallback); every step is recorded, traced, logged and counted.
 
----
+## The cockpit
 
-## 2. Low-Code Sponsor Integrations
+People arrive with a job to do, so the cockpit starts by asking what it is. Each role gets a home with its own work queue (an AG Grid, grouped by kind of work, with the money, the deadline and a button on every row) and only the screens that job uses. Every other screen stays one click away.
 
-| Sponsor | Role in Unhold | Low-Code Value |
-| :--- | :--- | :--- |
-| **AG Grid & AG Studio** | Primary UI & Observability Cockpit | Zero custom chart coding; built-in Master-Detail rows, timeline renderers, and embeddable AI assistant. |
-| **Render** | Cloud Hosting, Webhooks & Orchestration | Public HTTPS endpoint for PayPal webhooks, zero cold-starts with always-on credit, and Render Workflows for periodic sweeps. |
-| **Astropods** | Agent Runtime & Guardrails | Declarative agent loops, tool allowlists, and production-level agent observability. |
-| **Zapier** | External Integrations & Notifications | No-code inbox scraping for payment emails and instant Slack approval notifications. |
-| **PayPal Agent Toolkit** | Official PayPal Function Calling | Pre-tested tools (`get_order`, `create_shipment_tracking`, `list_disputes`). Zero REST boilerplate. |
-| **Elastic** | Grounded Docs Search (RAG) | Managed `semantic_text` hybrid search over PayPal developer guides; offline SQLite FTS5 fallback. |
-| **Postman** | Sandbox Contract Prover | Declarative test collection run via Postman CLI (`newman`) to prove fixes against sandbox. |
+| Role | Arrives from | Home queue | Screens |
+|---|---|---|---|
+| **Owner** | Slack approval message, bookmark | Plans to decide, money that can release sooner, account health | Approvals, Held money, Cash goal, Release timeline |
+| **Fulfilment** | A carrier export arriving through Zapier | Parcels ready to upload, matches to check, paid orders not shipped, failed uploads | Match tracking, Holds |
+| **Support** | A dispute alert, an email to check before shipping | Disputes by reply date, payments PayPal is still reviewing | Disputes, Payment guard |
+| **Admin** | A failure alert | Failed runs, errors, disconnected services, audit chain state | Agent runs, Audit, Logs |
+| **Guided tour** | The submission link | Seven steps through the loop, each marked real or simulated | All screens |
 
----
+- Links carry the role: the Slack approval message opens `/?role=owner#agents`, where the plan can be read parcel by parcel.
+- A role is a view, not a permission (the app has no user accounts). An optional name is recorded with approvals in the audit trail.
+- **Holds** and **Match tracking** only let you tick parcels that can really be uploaded. Each row says whether a **real PayPal order** or **demo data** is behind it, and every upload asks first and states exactly what goes to PayPal and what is only recorded as a simulation.
+- A banner and a count in the navigation show a plan waiting for a decision from any screen. Failures show a message with a retry, and holds and the audit chain export to CSV.
 
-## 3. Deploying to Render (Cloud Production)
+## Sponsor platforms, honestly
 
-Unhold is fully prepared for immediate deployment to **Render.com** (utilizing the Render Starter tier, $50 hackathon credit, or Free tier):
+| Platform | Role | Where |
+|---|---|---|
+| **AG Grid** | Every screen of the cockpit (Enterprise: integrated charts, row grouping, master-detail, sparklines); "Ask the grid" turns plain English into grid state | `public/` |
+| **Astropods** | The agent team packaged as a blueprint (`astropods.yml`, `AGENT.md`, `Dockerfile.astropods`): frontend agent, shared Postgres knowledge store, OpenTelemetry traces | repo root |
+| **Zapier** | Approval requests and run results out (catch hook and Zapier MCP to Slack); carrier manifests and run triggers in (`/api/manifests/ingest`, `/api/agent/runs`) | `src/agents/`, `src/engine/` |
+| **Elastic** | Semantic + keyword search over holds, audit, disputes and evidence | `src/search/elastic.ts` |
+| **KERNEL** | A cloud browser reads the carrier page to confirm delivery | `src/engine/carrier_browser.ts` |
+| **Channel3** | Product-graph price check on held items | `src/engine/product_lookup.ts` |
+| **Bryntum** | Release timeline (Scheduler, trial package) | `public/timeline.js` |
+| **Render** | Hosting; cron sweep defined in `render.yaml` | `render.yaml` |
+| **Postman** | Collection in `postman_collection.json` | root |
+| **APIMatic** | Orders v2 spec imported to a project; SDK generation not yet wired in | n/a |
 
-### Method A: 1-Click Render Blueprint Deployment (Recommended)
+## Production behaviour
 
-1. Click the **Deploy to Render** button below:  
-   [![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/anindyasundarbera/unhold-paypal-sentinel)
-2. Render will automatically parse [`render.yaml`](render.yaml) and configure:
-   - **`unhold-api`**: Web Service running Fastify on port 10000 with `/health` check.
-   - **`unhold-reconcile-sweep`**: Cron job running every 6 hours (`0 */6 * * *`) executing the automated ledger reconciliation sweep.
-   - **`unhold-postgres`**: Managed PostgreSQL database instance (optional).
-3. Under Environment Variables, input your credentials (or leave defaults for offline demonstration):
-   - `PAYPAL_CLIENT_ID` & `PAYPAL_CLIENT_SECRET`: Your PayPal Sandbox credentials from [developer.paypal.com](https://developer.paypal.com/dashboard).
-   - `ZAPIER_WEBHOOK_URL`: Your Zapier Catch Hook URL to receive real-time Slack cards.
-   - `ASTROPODS_API_KEY`: Your Astropods AI Gateway API key.
-4. Click **Apply**. Render will clone, build TypeScript, and launch the service with a public HTTPS URL (e.g. `https://unhold-api.onrender.com`).
+- **Logs:** structured JSON (pino), secrets redacted, a request id on every call (`x-request-id`), warnings/errors and agent events persisted to Supabase and shown on the **Logs** screen.
+- **Tracing:** OpenTelemetry spans for each run and step (`gen_ai.*` / `unhold.*` attributes) when `OTEL_EXPORTER_OTLP_ENDPOINT` is set, which Astropods injects.
+- **Metrics and health:** `GET /metrics` (Prometheus), `/healthz`, `/readyz` (checks the ledger), graceful shutdown, stale-run recovery on start.
+- **Safety:** unsigned PayPal webhooks are refused on a live account; approval links are signed per decision and need a POST to act. Set `COCKPIT_ACCESS_CODE` to require a code for every change made from the cockpit (reading stays open).
+- **Audit:** a SHA-256 hash chain of every state change, verifiable from the cockpit.
 
----
-
-### Method B: Manual Web Service Deployment on Render
-
-If you prefer deploying a standalone Web Service (Free or Starter tier):
-
-1. Go to your [Render Dashboard](https://dashboard.render.com/) and click **New + ➔ Web Service**.
-2. Connect the public repository: `https://github.com/anindyasundarbera/unhold-paypal-sentinel`.
-3. Configure the settings:
-   - **Name:** `unhold-paypal-sentinel`
-   - **Region:** `Oregon (US West)` or your preferred region
-   - **Branch:** `main`
-   - **Runtime:** `Node` (Node.js >= 22.5.0 detected via `.node-version`)
-   - **Build Command:** `npm install && npm run build`
-   - **Start Command:** `npm start`
-   - **Plan:** `Free` or `Starter`
-4. Under **Advanced ➔ Health Check Path**, set:
-   - `/health`
-5. Under **Environment Variables**, add:
-   ```env
-   NODE_ENV=production
-   PORT=10000
-   HOST=0.0.0.0
-   DATABASE_PATH=./data/unhold.db
-   PAYPAL_ENVIRONMENT=sandbox
-   ```
-6. Click **Create Web Service**. Once deployed:
-   - Dashboard: `https://<your-service>.onrender.com/`
-   - Technical Docs: `https://<your-service>.onrender.com/doc`
-   - 14-Slide Deck: `https://<your-service>.onrender.com/deck`
-   - Health Check: `https://<your-service>.onrender.com/health`
-
----
-
-## 4. Quick Start (Local Development)
+## Run it
 
 ```bash
-# 1. Install dependencies
-cd projects/unhold_paypal
 npm install
-
-# 2. Run unit, contract & Red-Team headless Chrome E2E test suite (65 tests across 15 suites)
-npm test
-
-# 3. Build project
-npm run build
-
-# 4. Start local Fastify server
-npm start
-# ➔ Server runs on http://localhost:10000
-# ➔ Cockpit: http://localhost:10000/
-# ➔ Technical Docs: http://localhost:10000/doc
-# ➔ Presentation Deck: http://localhost:10000/deck
+cp .env.example .env      # fill in PayPal sandbox keys and DATABASE_URL (Supabase Postgres)
+npm run build && npm start   # http://localhost:10000
+npm test                  # 71 tests, hermetic: no network, no real credentials, in-memory Postgres
+npm run test:ui           # 23 browser checks that walk every screen and feature (needs Chrome)
 ```
 
----
+Key environment variables are listed in `.env.example`. Only `DATABASE_URL` and the PayPal sandbox credentials are required; each sponsor integration switches on when its key is set. `AG_GRID_API_KEY` is an AG Grid Enterprise + Charts trial key (the trial in this repo expires 10 Dec 2026; after that the grids keep working with an evaluation watermark).
 
-## 5. The 3 Demo Slack & Zapier Alert Moments
+To put real orders behind holds: `npm run seed:live -- 4` creates sandbox orders, waits while you pay them as a **US** sandbox buyer (an Indian buyer cannot pay the Indian sandbox seller), then links them to holds.
 
-1. **Moment 1: Cash Acceleration Executed (`orders.tracking_accelerated`)**  
-   Fires when merchant approves batch upload of 38 matched carrier tracking manifests. Dispatches to PayPal Orders v2 Track API with `PayPal-Request-Id`, accelerating $4,435.50 by 12.4 days and jumping goal confidence to 94%.
-2. **Moment 2: Phishing Scam Intercepted (`payment.fraud_detected`)**  
-   Fires when Payment Guard performs pre-flight verification on a spoofed confirmation email and discovers a 404 nonexistent PayPal capture ID. Halts shipment and drafts 1-click report to `phishing@paypal.com`.
-3. **Moment 3: Autonomous Dispute Settled (`dispute.settled`)**  
-   Fires when Buyer AI agent verifies merchant's RFC 9901 SD-JWT delivery proof signed with `ES256`. The dispute is amicably withdrawn and held funds are released without human intervention.
+## Deploy
 
+- **Render:** `render.yaml` (web service plus a 6-hourly sweep).
+- **Astropods:** deployed (agent `unhold-agent-team`, running) with the image built by `.github/workflows/astropods-image.yml` and published to GHCR, so no local Docker is needed: `ast spec validate && ast blueprint push unhold-agent-team --no-build && ast blueprint deploy unhold-agent-team --vars-file <env file>`. Astropods puts sign-in in front of the cockpit, and OpenTelemetry traces go to its collector. Set `agent.image` in `astropods.yml` to the newly built image tag before each push.
+
+## Known limits
+
+- The Render deployment has no login unless `COCKPIT_ACCESS_CODE` is set; use the Astropods deployment (which has Astropods sign-in) for anything beyond a demo. Approval links still point at Render (`PUBLIC_BASE_URL`) so they work without an Astropods account.
+- Free-tier services and the Elastic and AG Grid trials expire; see dates above.
+- The "Ask the grid", reasoning and dispute-negotiation features call an LLM and fall back to rules when it is unavailable.

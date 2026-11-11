@@ -1,6 +1,8 @@
+import './helpers/test_env.js';
 import { test, describe, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { LedgerDB } from '../src/db/ledger_db.js';
+import { memoryLedger } from './helpers/memory_ledger.js';
 import { seedLedger } from '../src/seed/seeder.js';
 import { PayPalClient } from '../src/paypal/client.js';
 import {
@@ -14,13 +16,13 @@ import type { FastifyInstance } from 'fastify';
 
 process.env.NODE_ENV = 'test';
 
-describe('Step 5: Payment Guard (Anti-Scam & Pre-Flight)', () => {
+describe('Step 5: Payment Guard (Anti-Scam & Pre-Flight)', async () => {
   let db: LedgerDB;
   let paypal: PayPalClient;
 
-  before(() => {
-    db = new LedgerDB(':memory:');
-    seedLedger(db);
+  before(async () => {
+    db = await memoryLedger();
+    await seedLedger(db);
     paypal = new PayPalClient({
       clientId: 'sandbox_client',
       clientSecret: 'sandbox_secret',
@@ -28,14 +30,14 @@ describe('Step 5: Payment Guard (Anti-Scam & Pre-Flight)', () => {
     });
   });
 
-  after(() => {
-    db.close();
+  after(async () => {
+    await db.close();
   });
 
   // -------------------------------------------------------------
   // Test 1: Email Notification Parsing
   // -------------------------------------------------------------
-  test('parses authentic PayPal payment notification email correctly', () => {
+  test('parses authentic PayPal payment notification email correctly', async () => {
     const rawEmail = `
       From: "PayPal Service" <service@paypal.com>
       Subject: You received a payment of $149.99 USD from John Doe
@@ -61,7 +63,7 @@ describe('Step 5: Payment Guard (Anti-Scam & Pre-Flight)', () => {
     assert.equal(notice.urgency_cues.length, 0);
   });
 
-  test('parses and detects counterfeit phishing notice with fake domain and urgency cues', () => {
+  test('parses and detects counterfeit phishing notice with fake domain and urgency cues', async () => {
     const fakeEmail = `
       From: "PayPal Security Verification" <service@intl-paypal-verification.com>
       Subject: URGENT: Payment of $850.00 USD on hold!
@@ -113,7 +115,7 @@ describe('Step 5: Payment Guard (Anti-Scam & Pre-Flight)', () => {
     assert.ok(report.audit_entry);
 
     // Verify block was recorded in SQLite tamper-evident audit chain
-    const auditChain = db.getAuditChain();
+    const auditChain = await db.getAuditChain();
     const lastAudit = auditChain[auditChain.length - 1];
     assert.equal(lastAudit.actor, 'Payment Guard (Anti-Scam)');
     assert.equal(lastAudit.action, 'BLOCK_PHISHING_ATTEMPT');
@@ -197,9 +199,9 @@ describe('Step 5: Payment Guard (Anti-Scam & Pre-Flight)', () => {
   // -------------------------------------------------------------
   // Test 3: Pre-Flight Seller Protection Auditor
   // -------------------------------------------------------------
-  test('enforces $750 signature confirmation rule on high-value orders', () => {
+  test('enforces $750 signature confirmation rule on high-value orders', async () => {
     // 1. $850 order without signature: AT_RISK, can_ship = false
-    const unsignedAudit = auditPreFlightSellerProtection(
+    const unsignedAudit = await auditPreFlightSellerProtection(
       {
         order_id: 'ORD-HIGHVAL-01',
         capture_id: 'CAP-HIGHVAL-01',
@@ -219,7 +221,7 @@ describe('Step 5: Payment Guard (Anti-Scam & Pre-Flight)', () => {
     assert.ok(unsignedAudit.checklist.find((c) => c.check_name.includes('Signature') && c.status === 'FAIL'));
 
     // 2. $850 order with signature confirmation: PROTECTED, can_ship = true
-    const signedAudit = auditPreFlightSellerProtection(
+    const signedAudit = await auditPreFlightSellerProtection(
       {
         order_id: 'ORD-HIGHVAL-01',
         capture_id: 'CAP-HIGHVAL-01',
@@ -238,7 +240,7 @@ describe('Step 5: Payment Guard (Anti-Scam & Pre-Flight)', () => {
     assert.equal(signedAudit.required_shipping_actions.length, 0);
 
     // 3. $150 order (under $750): signature not required
-    const normalAudit = auditPreFlightSellerProtection(
+    const normalAudit = await auditPreFlightSellerProtection(
       {
         order_id: 'ORD-NORMAL-01',
         capture_id: 'CAP-NORMAL-01',
@@ -256,8 +258,8 @@ describe('Step 5: Payment Guard (Anti-Scam & Pre-Flight)', () => {
     assert.equal(normalAudit.requires_signature, false);
   });
 
-  test('blocks shipment when destination address differs from PayPal checkout record', () => {
-    const mismatchAudit = auditPreFlightSellerProtection(
+  test('blocks shipment when destination address differs from PayPal checkout record', async () => {
+    const mismatchAudit = await auditPreFlightSellerProtection(
       {
         order_id: 'ORD-MISMATCH-01',
         capture_id: 'CAP-MISMATCH-01',
@@ -281,19 +283,19 @@ describe('Step 5: Payment Guard (Anti-Scam & Pre-Flight)', () => {
   // -------------------------------------------------------------
   // Test 4: Fastify Server REST Endpoints
   // -------------------------------------------------------------
-  describe('Fastify Server Payment Guard Endpoints', () => {
+  describe('Fastify Server Payment Guard Endpoints', async () => {
     let server: FastifyInstance;
     let testDb: LedgerDB;
 
     before(async () => {
-      testDb = new LedgerDB(':memory:');
-      seedLedger(testDb);
+      testDb = await memoryLedger();
+      await seedLedger(testDb);
       server = await createServer(testDb);
     });
 
     after(async () => {
       await server.close();
-      testDb.close();
+      await testDb.close();
     });
 
     test('POST /api/payment-guard/verify-email blocks fake payment notice', async () => {
